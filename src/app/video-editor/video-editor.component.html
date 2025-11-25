@@ -1,0 +1,239 @@
+<section class="video-editor">
+  <header class="header">
+    <div class="header__copy">
+      <div class="chip-row">
+        <span class="chip chip--accent">Live preview</span>
+        <span class="chip chip--ghost">Dash.js + FFmpeg</span>
+      </div>
+      <h1>Precision video surgery</h1>
+      <p>
+        Stage trims, carve out awkward segments, and offload rendering to FFmpeg without risking
+        your master asset. Everything happens in the browser until you choose to send it server-side.
+      </p>
+      <ul class="stat-grid">
+        <li>
+          <span class="stat-label">Trim accuracy</span>
+          <strong>±50&nbsp;ms</strong>
+        </li>
+        <li>
+          <span class="stat-label">Middle cuts</span>
+          <strong>{{ cuts().length || 0 }}</strong>
+        </li>
+        <li>
+          <span class="stat-label">Segment length</span>
+          <strong>{{ formatTime(trimmedLength()) }}</strong>
+        </li>
+      </ul>
+    </div>
+    <div class="header__panel">
+      <div class="status-card">
+        <p class="status-label">Backend target</p>
+        <strong>{{ backendHost }}</strong>
+        <span class="status-pill" [class.status-pill--ready]="sourceLoaded()">
+          {{ sourceLoaded() ? 'Source ready' : 'Waiting for source' }}
+        </span>
+      </div>
+      <div class="header__actions">
+        <button class="ghost" type="button" (click)="resetEditor(true)">Reset session</button>
+        <button type="button" (click)="setTrimStartFromCurrent()" [disabled]="!sourceLoaded()">
+          Mark in from playhead
+        </button>
+      </div>
+      <p class="header__hint">
+        Load a source URL below then scrub, cut, and ship render jobs without touching the original
+        file.
+      </p>
+    </div>
+  </header>
+
+  <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="loadVideo()">
+    <label>
+      Source URL
+      <input
+        formControlName="sourceUrl"
+        type="url"
+        placeholder="https://storage.example.com/demo.mp4 or .mpd"
+        [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched"
+      />
+    </label>
+    <button type="submit" [disabled]="sourceForm.invalid || loading()">
+      {{ loading() ? 'Loading…' : 'Load Source' }}
+    </button>
+  </form>
+
+  <p *ngIf="errorMessage()" class="error">{{ errorMessage() }}</p>
+
+  <section class="player" [class.player--idle]="!sourceLoaded()">
+    <div class="player__placeholder" *ngIf="!sourceLoaded()">
+      Paste an MP4 or MPEG-DASH URL and choose “Load Source”.
+    </div>
+    <video
+      #videoEl
+      [attr.controls]="sourceLoaded() ? '' : null"
+      playsinline
+      (loadedmetadata)="onMetadataLoaded()"
+      (timeupdate)="onTimeUpdate()"
+      (error)="onVideoError()"
+    ></video>
+
+    <div class="player-controls" [class.disabled]="!sourceLoaded()">
+      <button type="button" (click)="togglePlayPause()" [disabled]="!sourceLoaded()">
+        Play / Pause
+      </button>
+      <button type="button" (click)="jumpTo(trimStart())" [disabled]="!sourceLoaded()">
+        Jump to Trim Start
+      </button>
+      <button type="button" (click)="jumpTo(trimEnd())" [disabled]="!sourceLoaded()">
+        Jump to Trim End
+      </button>
+      <span>Current: {{ formatTime(currentTime()) }}</span>
+      <span>Duration: {{ formatTime(duration()) }}</span>
+    </div>
+  </section>
+
+  <section
+    class="timeline-shell"
+    *ngIf="sourceLoaded()"
+  >
+    <div class="timeline-meta">
+      <h2>Unified timeline</h2>
+      <p>Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a cut selection.</p>
+    </div>
+    <div
+      class="timeline"
+      (pointerdown)="onTimelinePointerDown($event)"
+      (pointermove)="onTimelinePointerMove($event)"
+      (pointerup)="onTimelinePointerUp($event)"
+      (pointerleave)="onTimelinePointerLeave()"
+    >
+      <div class="timeline__rail"></div>
+      <div class="timeline__shade timeline__shade--left" [style.width.%]="percentFor(trimStart())"></div>
+      <div
+        class="timeline__shade timeline__shade--right"
+        [style.width.%]="100 - percentFor(trimEnd())"
+      ></div>
+      <div
+        *ngFor="let cut of cuts()"
+        class="timeline__cut"
+        [style.left.%]="percentFor(cut.start)"
+        [style.width.%]="percentSpan(cut.start, cut.end)"
+        (click)="focusCut(cut, $event)"
+      ></div>
+      <div
+        class="timeline__cut timeline__cut--active"
+        *ngIf="hasCuts()"
+        [style.left.%]="percentFor(cutSelection().start)"
+        [style.width.%]="percentSpan(cutSelection().start, cutSelection().end)"
+      ></div>
+      <div
+        class="timeline__cut timeline__cut--pending"
+        *ngIf="timelineSelection()"
+        [style.left.%]="percentFor(timelineSelection()?.start || 0)"
+        [style.width.%]="percentSpan(timelineSelection()?.start || 0, timelineSelection()?.end || 0)"
+      ></div>
+      <div class="timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
+    </div>
+  </section>
+
+  <section class="cuts-panel" *ngIf="duration() > 0">
+    <div class="cuts-panel__form">
+      <h2>Manual cut entry</h2>
+      <p>Provide start/end (in seconds) or capture values from the playhead.</p>
+      <div class="field-grid">
+        <label>
+          Start (sec)
+          <input
+            type="number"
+            step="0.05"
+            [min]="0"
+            [max]="duration()"
+            [value]="cutSelection().start"
+            (input)="updateCutSelection('start', $event)"
+          />
+        </label>
+        <label>
+          End (sec)
+          <input
+            type="number"
+            step="0.05"
+            [min]="0"
+            [max]="duration()"
+            [value]="cutSelection().end"
+            (input)="updateCutSelection('end', $event)"
+          />
+        </label>
+      </div>
+      <div class="hint">
+        <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
+        <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
+        <button type="button" class="primary" (click)="addCut()">Add cut</button>
+      </div>
+    </div>
+
+    <div class="cuts-panel__list">
+      <h2>Cut queue</h2>
+      <ul class="cuts" *ngIf="hasCuts(); else noCuts">
+        <li *ngFor="let cut of cuts()">
+          <div class="cuts__times">
+            <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
+            <small>{{ formatTime(cut.end - cut.start) }}</small>
+          </div>
+          <div class="cuts__actions">
+            <button type="button" (click)="jumpTo(cut.start)">Preview</button>
+            <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
+          </div>
+        </li>
+      </ul>
+      <ng-template #noCuts>
+        <p class="muted">No cuts added yet.</p>
+      </ng-template>
+    </div>
+  </section>
+
+  <section class="summary" *ngIf="duration() > 0">
+    <h2>Export Plan</h2>
+    <ol>
+      <li *ngFor="let step of exportPlan()">{{ step }}</li>
+    </ol>
+    <p class="muted">
+      This is a UI prototype. Hook these staged edits into your encoding pipeline
+      (ffmpeg, MediaConvert, etc.) to produce the final asset.
+    </p>
+  </section>
+
+  <section class="server-panel" *ngIf="duration() > 0">
+    <div>
+      <h2>Server Render (FFmpeg)</h2>
+      <p>
+        Send the current trim/cut plan to the Node backend. The server downloads from the provided
+        URL, cuts the requested keep segments, concatenates them, and writes a new file without
+        mutating the original.
+      </p>
+    </div>
+    <div class="server-panel__actions">
+      <button
+        type="button"
+        class="primary"
+        [disabled]="!canRender() || renderBusy()"
+        (click)="renderViaBackend()"
+      >
+        {{ renderBusy() ? 'Rendering…' : 'Send to backend' }}
+      </button>
+      <p *ngIf="renderResult(); else noRender">
+        Job {{ renderResult()?.jobId }} ready:
+        <a
+          class="download-link"
+          [href]="renderDownloadUrl() || undefined"
+          target="_blank"
+          rel="noopener"
+        >
+          Download output
+        </a>
+      </p>
+      <ng-template #noRender>
+        <p class="muted">No server job yet.</p>
+      </ng-template>
+    </div>
+  </section>
+</section>
+

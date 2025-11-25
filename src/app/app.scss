@@ -1,0 +1,32 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: inherit;
+  padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 3vw, 2.5rem) clamp(3rem, 6vw, 5rem);
+  position: relative;
+}
+
+.app-shell::before,
+.app-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-shell::before {
+  background: radial-gradient(circle at 15% 20%, rgba(124, 58, 237, 0.18), transparent 45%);
+}
+
+.app-shell::after {
+  background: radial-gradient(circle at 85% 10%, rgba(14, 165, 233, 0.18), transparent 40%);
+}
+
+app-video-editor {
+  position: relative;
+  z-index: 1;
+}
