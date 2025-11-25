@@ -2,6 +2,13 @@
 
 A modern Angular + TypeScript video editing interface with a Node.js/FFmpeg backend. Stage non-destructive trims and cuts visually on a unified timeline, then render the final output server-side without touching the original source file.
 
+
+https://github.com/user-attachments/assets/901d4e4c-032b-4acb-969e-9743783d165b
+
+
+
+
+
 ## Features
 
 - **Unified Timeline**: Click to scrub, drag to move playhead, Shift+drag to create cuts
