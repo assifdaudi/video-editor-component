@@ -13,6 +13,7 @@ npm-debug.log
 yarn-error.log
 /server/dist
 /server/output
+*.tsbuildinfo
 
 # IDEs and editors
 .idea/
