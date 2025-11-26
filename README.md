@@ -31,6 +31,8 @@ npm install
 
 # run frontend only
 npm start        # -> http://localhost:4200
+# or
+npm run dev:client
 
 # production build
 npm run build
@@ -48,6 +50,14 @@ npm run dev        # starts on http://localhost:4000
 npm run build && npm start
 ```
 
+Or from the project root:
+
+```bash
+npm run dev:server
+```
+
+The server will log progress percentage during video rendering operations.
+
 ### Run both servers together
 
 From the project root:
@@ -57,6 +67,24 @@ npm run dev
 ```
 
 That command launches the backend on `http://localhost:4000` and Angular dev server on `http://localhost:4200` using `concurrently`. Stop both with `Ctrl+C`.
+
+### Run in separate terminals
+
+You can also run the frontend and server in separate terminals for better log visibility:
+
+**Terminal 1 (Server):**
+```bash
+npm run dev:server
+# or
+cd server && npm run dev
+```
+
+**Terminal 2 (Frontend):**
+```bash
+npm run dev:client
+# or
+npm start
+```
 
 Endpoints:
 

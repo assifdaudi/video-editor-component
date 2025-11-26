@@ -68,40 +68,74 @@ app.post('/api/render', async (req, res) => {
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), `video-job-${jobId}-`));
   const segmentPaths: string[] = [];
 
+  // Calculate total duration for progress tracking
+  const totalDuration = keepSegments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+  // Weight segment extraction at 70% and concatenation at 30% of total work
+  const segmentWorkWeight = 0.7;
+  const concatWorkWeight = 0.3;
+  const weightedTotal = totalDuration * segmentWorkWeight + totalDuration * concatWorkWeight;
+
   try {
     await ensureDir(OUTPUT_DIR);
 
+    console.log(`[${jobId}] Starting render: ${keepSegments.length} segment(s), total duration: ${totalDuration.toFixed(2)}s`);
+
     for (const [index, segment] of keepSegments.entries()) {
       const segmentPath = path.join(tempDir, `segment-${index}.mp4`);
-      await runFfmpeg([
-        '-hide_banner',
-        '-y',
-        '-i',
-        body.sourceUrl,
-        '-ss',
-        segment.start.toFixed(3),
-        '-t',
-        (segment.end - segment.start).toFixed(3),
-        '-avoid_negative_ts',
-        'make_zero',
-        '-c',
-        'copy',
-        segmentPath
-      ]);
+      const duration = segment.end - segment.start;
+      const segmentStartProgress = keepSegments
+        .slice(0, index)
+        .reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+      
+      console.log(`[${jobId}] Extracting segment ${index + 1}/${keepSegments.length} (${duration.toFixed(2)}s)`);
+      
+      // Use -ss after -i for accurate seeking (output seeking)
+      // This ensures precise timing even when not aligned to keyframes
+      await runFfmpegWithProgress(
+        [
+          '-hide_banner',
+          '-y',
+          '-ss',
+          segment.start.toFixed(3),
+          '-i',
+          body.sourceUrl,
+          '-t',
+          duration.toFixed(3),
+          '-avoid_negative_ts',
+          'make_zero',
+          '-vsync',
+          'cfr',
+          '-c',
+          'copy',
+          segmentPath
+        ],
+        duration,
+        segmentStartProgress * segmentWorkWeight, // Weight the progress
+        weightedTotal,
+        jobId,
+        `Segment ${index + 1}/${keepSegments.length}`
+      );
       segmentPaths.push(segmentPath);
     }
 
     const concatFile = path.join(tempDir, 'concat.txt');
+    // Convert Windows paths to forward slashes for ffmpeg compatibility
+    // and escape single quotes properly
     await fsp.writeFile(
       concatFile,
-      segmentPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
+      segmentPaths
+        .map(p => p.replace(/\\/g, '/').replace(/'/g, "'\\''"))
+        .map(p => `file '${p}'`)
+        .join('\n'),
       'utf8'
     );
 
     const outputFile = path.join(OUTPUT_DIR, `${jobId}.${body.format}`);
-    const needsTranscode = keepSegments.some(
-      segment => segment.end - segment.start < MIN_TRANSCODE_SEGMENT_SECONDS
-    );
+    // Always transcode when concatenating multiple segments to ensure compatibility
+    // or when segments are too small for accurate stream copy
+    const needsTranscode =
+      keepSegments.length > 1 ||
+      keepSegments.some(segment => segment.end - segment.start < MIN_TRANSCODE_SEGMENT_SECONDS);
 
     const concatArgs = [
       '-hide_banner',
@@ -127,14 +161,37 @@ app.post('/api/render', async (req, res) => {
         '-c:a',
         'aac',
         '-b:a',
-        TRANSCODE_AUDIO_BITRATE
+        TRANSCODE_AUDIO_BITRATE,
+        '-movflags',
+        '+faststart'
       );
     } else {
-      concatArgs.push('-c', 'copy');
+      // Even with copy, add flags to ensure proper timestamp handling
+      concatArgs.push(
+        '-c',
+        'copy',
+        '-avoid_negative_ts',
+        'make_zero',
+        '-fflags',
+        '+genpts'
+      );
     }
 
     concatArgs.push(outputFile);
-    await runFfmpeg(concatArgs);
+    
+    console.log(`[${jobId}] Concatenating ${keepSegments.length} segment(s)...`);
+    // For concatenation progress: if transcoding, it processes full video again
+    // We'll weight segment extraction at 70% and concatenation at 30% of total work
+    const segmentWorkDone = totalDuration * segmentWorkWeight;
+    
+    await runFfmpegWithProgress(
+      concatArgs,
+      totalDuration, // Duration being processed in this step
+      segmentWorkDone, // Progress already completed
+      weightedTotal, // Total weighted work
+      jobId,
+      'Concatenating'
+    );
 
     const publicPath = `/output/${path.basename(outputFile)}`;
     return res.json({
@@ -208,6 +265,72 @@ function runFfmpeg(args: string[]): Promise<void> {
     child.on('error', reject);
     child.on('exit', code => {
       if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function parseTime(timeStr: string): number {
+  // Parse time in format HH:MM:SS.mmm or MM:SS.mmm
+  const parts = timeStr.trim().split(':');
+  if (parts.length === 3) {
+    const hours = parseFloat(parts[0] ?? '0') || 0;
+    const minutes = parseFloat(parts[1] ?? '0') || 0;
+    const seconds = parseFloat(parts[2] ?? '0') || 0;
+    return hours * 3600 + minutes * 60 + seconds;
+  } else if (parts.length === 2) {
+    const minutes = parseFloat(parts[0] ?? '0') || 0;
+    const seconds = parseFloat(parts[1] ?? '0') || 0;
+    return minutes * 60 + seconds;
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+function runFfmpegWithProgress(
+  args: string[],
+  duration: number,
+  baseProgress: number,
+  totalDuration: number,
+  jobId: string,
+  stage: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ffmpegPath = ffmpegInstaller.path;
+    const child = spawn(ffmpegPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let lastProgress = -1;
+    // Match time in format HH:MM:SS.mmm or MM:SS.mmm
+    const timeRegex = /time=(\d{1,2}:\d{2}:\d{2}\.\d{2}|\d{1,2}:\d{2}\.\d{2})/;
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      const match = output.match(timeRegex);
+      
+      if (match && match[1] && duration > 0) {
+        const currentTime = parseTime(match[1]);
+        const segmentProgress = Math.min(currentTime / duration, 1);
+        const overallProgress = (baseProgress + segmentProgress * duration) / totalDuration;
+        const percentage = Math.min(Math.round(overallProgress * 100), 100);
+        
+        if (percentage !== lastProgress && percentage >= 0) {
+          lastProgress = percentage;
+          process.stdout.write(`\r[${jobId}] ${stage}: ${percentage}%`);
+        }
+      }
+    });
+
+    child.on('error', reject);
+    child.on('exit', code => {
+      // Clear progress line and add newline
+      process.stdout.write('\r' + ' '.repeat(80) + '\r');
+      
+      if (code === 0) {
+        console.log(`[${jobId}] ${stage}: Complete (100%)`);
         resolve();
       } else {
         reject(new Error(`ffmpeg exited with code ${code}`));
