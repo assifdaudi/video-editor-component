@@ -75,10 +75,15 @@ app.post('/api/render', async (req, res) => {
   const concatWorkWeight = 0.3;
   const weightedTotal = totalDuration * segmentWorkWeight + totalDuration * concatWorkWeight;
 
+  // Shared progress state for unified percentage display
+  let lastDisplayedProgress = 0;
+
   try {
     await ensureDir(OUTPUT_DIR);
 
     console.log(`[${jobId}] Starting render: ${keepSegments.length} segment(s), total duration: ${totalDuration.toFixed(2)}s`);
+    process.stdout.write(`\r[${jobId}] Progress: 1%`);
+    lastDisplayedProgress = 1;
 
     for (const [index, segment] of keepSegments.entries()) {
       const segmentPath = path.join(tempDir, `segment-${index}.mp4`);
@@ -86,8 +91,6 @@ app.post('/api/render', async (req, res) => {
       const segmentStartProgress = keepSegments
         .slice(0, index)
         .reduce((sum, seg) => sum + (seg.end - seg.start), 0);
-      
-      console.log(`[${jobId}] Extracting segment ${index + 1}/${keepSegments.length} (${duration.toFixed(2)}s)`);
       
       // Use -ss after -i for accurate seeking (output seeking)
       // This ensures precise timing even when not aligned to keyframes
@@ -110,10 +113,17 @@ app.post('/api/render', async (req, res) => {
           segmentPath
         ],
         duration,
-        segmentStartProgress * segmentWorkWeight, // Weight the progress
+        segmentStartProgress * segmentWorkWeight,
         weightedTotal,
+        segmentWorkWeight,
         jobId,
-        `Segment ${index + 1}/${keepSegments.length}`
+        (progress: number) => {
+          const percentage = Math.max(1, Math.min(progress, 99));
+          if (percentage > lastDisplayedProgress) {
+            lastDisplayedProgress = percentage;
+            process.stdout.write(`\r[${jobId}] Progress: ${percentage}%`);
+          }
+        }
       );
       segmentPaths.push(segmentPath);
     }
@@ -179,7 +189,6 @@ app.post('/api/render', async (req, res) => {
 
     concatArgs.push(outputFile);
     
-    console.log(`[${jobId}] Concatenating ${keepSegments.length} segment(s)...`);
     // For concatenation progress: if transcoding, it processes full video again
     // We'll weight segment extraction at 70% and concatenation at 30% of total work
     const segmentWorkDone = totalDuration * segmentWorkWeight;
@@ -189,9 +198,20 @@ app.post('/api/render', async (req, res) => {
       totalDuration, // Duration being processed in this step
       segmentWorkDone, // Progress already completed
       weightedTotal, // Total weighted work
+      concatWorkWeight,
       jobId,
-      'Concatenating'
+      (progress: number) => {
+        const percentage = Math.max(1, Math.min(progress, 99));
+        if (percentage > lastDisplayedProgress) {
+          lastDisplayedProgress = percentage;
+          process.stdout.write(`\r[${jobId}] Progress: ${percentage}%`);
+        }
+      }
     );
+    
+    // Clear progress line and show completion
+    process.stdout.write('\r' + ' '.repeat(80) + '\r');
+    console.log(`[${jobId}] Progress: 100% - Done`);
 
     const publicPath = `/output/${path.basename(outputFile)}`;
     return res.json({
@@ -293,9 +313,10 @@ function runFfmpegWithProgress(
   args: string[],
   duration: number,
   baseProgress: number,
-  totalDuration: number,
+  weightedTotal: number,
+  workWeight: number,
   jobId: string,
-  stage: string
+  onProgress: (percentage: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath = ffmpegInstaller.path;
@@ -314,23 +335,21 @@ function runFfmpegWithProgress(
       if (match && match[1] && duration > 0) {
         const currentTime = parseTime(match[1]);
         const segmentProgress = Math.min(currentTime / duration, 1);
-        const overallProgress = (baseProgress + segmentProgress * duration) / totalDuration;
+        // Calculate overall progress: baseProgress is already weighted, add this segment's weighted progress
+        const segmentWeightedDuration = duration * workWeight;
+        const overallProgress = (baseProgress + segmentProgress * segmentWeightedDuration) / weightedTotal;
         const percentage = Math.min(Math.round(overallProgress * 100), 100);
         
-        if (percentage !== lastProgress && percentage >= 0) {
+        if (percentage !== lastProgress && percentage >= 1) {
           lastProgress = percentage;
-          process.stdout.write(`\r[${jobId}] ${stage}: ${percentage}%`);
+          onProgress(percentage);
         }
       }
     });
 
     child.on('error', reject);
     child.on('exit', code => {
-      // Clear progress line and add newline
-      process.stdout.write('\r' + ' '.repeat(80) + '\r');
-      
       if (code === 0) {
-        console.log(`[${jobId}] ${stage}: Complete (100%)`);
         resolve();
       } else {
         reject(new Error(`ffmpeg exited with code ${code}`));
