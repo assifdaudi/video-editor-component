@@ -8,6 +8,8 @@ import { v4 as uuid } from 'uuid';
 import { spawn } from 'child_process';
 import { z } from 'zod';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import https from 'https';
+import http from 'http';
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
@@ -18,6 +20,35 @@ const MIN_TRANSCODE_SEGMENT_SECONDS = Number(
 const TRANSCODE_PRESET = process.env.FFMPEG_PRESET ?? 'veryfast';
 const TRANSCODE_CRF = process.env.FFMPEG_CRF ?? '20';
 const TRANSCODE_AUDIO_BITRATE = process.env.FFMPEG_AUDIO_BITRATE ?? '192k';
+
+const textOverlaySchema = z.object({
+  id: z.number(),
+  type: z.literal('text'),
+  text: z.string(),
+  start: z.number().min(0),
+  end: z.number().positive(),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  fontSize: z.number().positive().optional(),
+  fontColor: z.string().optional(),
+  backgroundColor: z.string().optional(),
+  opacity: z.number().min(0).max(1).optional()
+});
+
+const imageOverlaySchema = z.object({
+  id: z.number(),
+  type: z.literal('image'),
+  imageUrl: z.string().url(),
+  start: z.number().min(0),
+  end: z.number().positive(),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  width: z.number().min(1).max(100).optional(),
+  height: z.number().min(1).max(100).optional(),
+  opacity: z.number().min(0).max(1).optional()
+});
+
+const overlaySchema = z.discriminatedUnion('type', [textOverlaySchema, imageOverlaySchema]);
 
 const requestSchema = z.object({
   sourceUrl: z.string().url(),
@@ -31,6 +62,7 @@ const requestSchema = z.object({
       })
     )
     .default([]),
+  overlays: z.array(overlaySchema).default([]),
   format: z.enum(['mp4']).default('mp4')
 });
 
@@ -118,7 +150,7 @@ app.post('/api/render', async (req, res) => {
         segmentWorkWeight,
         jobId,
         (progress: number) => {
-          const percentage = Math.max(1, Math.min(progress, 99));
+          const percentage = Math.max(1, Math.min(progress, 100));
           if (percentage > lastDisplayedProgress) {
             lastDisplayedProgress = percentage;
             process.stdout.write(`\r[${jobId}] Progress: ${percentage}%`);
@@ -141,11 +173,45 @@ app.post('/api/render', async (req, res) => {
     );
 
     const outputFile = path.join(OUTPUT_DIR, `${jobId}.${body.format}`);
-    // Always transcode when concatenating multiple segments to ensure compatibility
+    // Always transcode when concatenating multiple segments, when overlays are present,
     // or when segments are too small for accurate stream copy
+    const hasOverlays = body.overlays && body.overlays.length > 0;
     const needsTranscode =
+      hasOverlays ||
       keepSegments.length > 1 ||
       keepSegments.some(segment => segment.end - segment.start < MIN_TRANSCODE_SEGMENT_SECONDS);
+    
+    // Download image overlays if needed
+    const imageOverlayPaths: string[] = [];
+    if (hasOverlays && body.overlays) {
+      console.log(`[${jobId}] Downloading ${body.overlays.filter(o => o.type === 'image').length} image overlay(s)...`);
+      for (const overlay of body.overlays) {
+        if (overlay.type === 'image') {
+          const originalExt = getImageExtension(overlay.imageUrl);
+          const imagePath = path.join(tempDir, `overlay-${overlay.id}.${originalExt}`);
+          try {
+            await downloadFile(overlay.imageUrl, imagePath);
+            // Verify file exists
+            await fsp.access(imagePath);
+            
+            // Convert webp to PNG to avoid FFmpeg webp decoder issues
+            let finalImagePath = imagePath;
+            if (originalExt === 'webp') {
+              const pngPath = path.join(tempDir, `overlay-${overlay.id}.png`);
+              console.log(`[${jobId}] Converting webp to PNG: ${imagePath} -> ${pngPath}`);
+              await convertWebpToPng(imagePath, pngPath, jobId);
+              finalImagePath = pngPath;
+            }
+            
+            imageOverlayPaths.push(finalImagePath);
+            console.log(`[${jobId}] Using image overlay: ${finalImagePath}`);
+          } catch (error) {
+            console.error(`[${jobId}] Failed to download/convert image overlay ${overlay.imageUrl}:`, error);
+            return res.status(400).json({ error: `Failed to download image overlay: ${overlay.imageUrl}` });
+          }
+        }
+      }
+    }
 
     const concatArgs = [
       '-hide_banner',
@@ -159,8 +225,29 @@ app.post('/api/render', async (req, res) => {
       '-i',
       concatFile
     ];
+    
+    // Add image overlay inputs as separate -i inputs (instead of movie filter)
+    // This allows us to reference them directly as [1:v], [2:v], etc.
+    // Don't use -loop here - we'll handle looping in the filter chain with a duration-based loop
+    if (hasOverlays && body.overlays && imageOverlayPaths.length > 0) {
+      for (const imagePath of imageOverlayPaths) {
+        concatArgs.push('-i', imagePath);
+      }
+    }
 
     if (needsTranscode) {
+      // Build overlay filters if overlays are present
+      if (hasOverlays && body.overlays && body.overlays.length > 0) {
+        const { filterComplex, outputStream } = buildOverlayFilters(body.overlays, imageOverlayPaths, totalDuration);
+        if (filterComplex) {
+          concatArgs.push('-filter_complex', filterComplex);
+          // Map the final output stream
+          concatArgs.push('-map', `[${outputStream}]`);
+          // Also map audio from input 0
+          concatArgs.push('-map', '0:a?');
+        }
+      }
+      
       concatArgs.push(
         '-c:v',
         'libx264',
@@ -193,6 +280,9 @@ app.post('/api/render', async (req, res) => {
     // We'll weight segment extraction at 70% and concatenation at 30% of total work
     const segmentWorkDone = totalDuration * segmentWorkWeight;
     
+    console.log(`[${jobId}] Starting concatenation/transcoding step...`);
+    console.log(`[${jobId}] FFmpeg command: ${ffmpegInstaller.path} ${concatArgs.join(' ')}`);
+    
     await runFfmpegWithProgress(
       concatArgs,
       totalDuration, // Duration being processed in this step
@@ -201,7 +291,7 @@ app.post('/api/render', async (req, res) => {
       concatWorkWeight,
       jobId,
       (progress: number) => {
-        const percentage = Math.max(1, Math.min(progress, 99));
+        const percentage = Math.max(1, Math.min(progress, 100));
         if (percentage > lastDisplayedProgress) {
           lastDisplayedProgress = percentage;
           process.stdout.write(`\r[${jobId}] Progress: ${percentage}%`);
@@ -209,17 +299,57 @@ app.post('/api/render', async (req, res) => {
       }
     );
     
+    console.log(`[${jobId}] Concatenation/transcoding completed`    );
+    
+    console.log(`[${jobId}] FFmpeg concatenation completed, verifying output file...`);
+    
+    // Wait a bit for file to be fully written, then verify
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Verify output file exists and has content before responding
+    let retries = 10;
+    while (retries > 0) {
+      try {
+        const stats = await fsp.stat(outputFile);
+        if (stats.size > 0) {
+          console.log(`[${jobId}] Output file verified: ${outputFile} (${stats.size} bytes)`);
+          break;
+        } else {
+          console.log(`[${jobId}] Output file exists but is empty, waiting...`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          retries--;
+        }
+      } catch (error) {
+        if (retries === 0) {
+          console.error(`[${jobId}] Output file verification failed:`, error);
+          throw new Error(`Output file was not created: ${outputFile}`);
+        }
+        console.log(`[${jobId}] Output file not ready yet, waiting... (${retries} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries--;
+      }
+    }
+    
+    // Ensure we show 100% when complete (only after file is verified)
+    if (lastDisplayedProgress < 100) {
+      lastDisplayedProgress = 100;
+      process.stdout.write(`\r[${jobId}] Progress: 100%`);
+    }
+    
     // Clear progress line and show completion
     process.stdout.write('\r' + ' '.repeat(80) + '\r');
     console.log(`[${jobId}] Progress: 100% - Done`);
+    console.log(`[${jobId}] Sending response...`);
 
     const publicPath = `/output/${path.basename(outputFile)}`;
-    return res.json({
+    const response = {
       jobId,
       outputFile: publicPath,
       segments: keepSegments,
       transcoded: needsTranscode
-    });
+    };
+    console.log(`[${jobId}] Response prepared, sending...`);
+    return res.json(response);
   } catch (error) {
     console.error('[render:error]', error);
     return res.status(500).json({ error: 'Failed to render video', details: String(error) });
@@ -320,19 +450,43 @@ function runFfmpegWithProgress(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath = ffmpegInstaller.path;
+    console.log(`[${jobId}] Spawning FFmpeg process...`);
     const child = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
     let lastProgress = -1;
+    let errorOutput = '';
+    let hasSeenProgress = false;
     // Match time in format HH:MM:SS.mmm or MM:SS.mmm
     const timeRegex = /time=(\d{1,2}:\d{2}:\d{2}\.\d{2}|\d{1,2}:\d{2}\.\d{2})/;
 
     child.stderr?.on('data', (data: Buffer) => {
       const output = data.toString();
+      errorOutput += output;
+      lastOutputTime = Date.now(); // Update last output time
+      
+      // Log all stderr output for debugging (but filter out common noise)
+      if (output.trim() && 
+          !output.includes('Fontconfig') && 
+          !output.includes('time=') && 
+          !output.includes('frame=') &&
+          !output.includes('fps=') &&
+          !output.includes('bitrate=') &&
+          !output.includes('speed=') &&
+          !output.includes('size=')) {
+        console.log(`[${jobId}] FFmpeg stderr: ${output.trim()}`);
+      }
+      
+      // Log errors and warnings immediately (but not fontconfig warnings which are harmless)
+      if ((output.includes('error') || output.includes('Error') || output.includes('failed')) && !output.includes('Fontconfig')) {
+        console.error(`[${jobId}] FFmpeg error output: ${output.trim()}`);
+      }
+      
       const match = output.match(timeRegex);
       
       if (match && match[1] && duration > 0) {
+        hasSeenProgress = true;
         const currentTime = parseTime(match[1]);
         const segmentProgress = Math.min(currentTime / duration, 1);
         // Calculate overall progress: baseProgress is already weighted, add this segment's weighted progress
@@ -340,11 +494,162 @@ function runFfmpegWithProgress(
         const overallProgress = (baseProgress + segmentProgress * segmentWeightedDuration) / weightedTotal;
         const percentage = Math.min(Math.round(overallProgress * 100), 100);
         
-        if (percentage !== lastProgress && percentage >= 1) {
-          lastProgress = percentage;
-          onProgress(percentage);
+        // Cap at 99% to avoid showing 100% before process actually completes
+        const cappedPercentage = Math.min(percentage, 99);
+        
+        if (cappedPercentage !== lastProgress && cappedPercentage >= 1) {
+          lastProgress = cappedPercentage;
+          onProgress(cappedPercentage);
         }
       }
+      
+      // Log when we see "frame=" to track if FFmpeg is still processing
+      if (output.includes('frame=')) {
+        const frameMatch = output.match(/frame=\s*(\d+)/);
+        if (frameMatch && frameMatch[1]) {
+          // Log every 100 frames to track progress without spamming
+          const frameNum = parseInt(frameMatch[1], 10);
+          if (frameNum % 100 === 0) {
+            console.log(`[${jobId}] FFmpeg processing frame ${frameNum}...`);
+          }
+        }
+      }
+      
+      // Check for completion indicators
+      if (output.includes('video:') && output.includes('audio:') && output.includes('kB time=')) {
+        console.log(`[${jobId}] FFmpeg appears to be finalizing output...`);
+      }
+    });
+    
+    child.stdout?.on('data', (data: Buffer) => {
+      // Log stdout for debugging
+      const output = data.toString();
+      if (output.trim()) {
+        console.log(`[${jobId}] FFmpeg stdout: ${output.trim()}`);
+      }
+    });
+    
+    // Add a timeout to detect hanging processes
+    // Also add a heartbeat to log if FFmpeg is still alive but not producing output
+    let lastOutputTime = Date.now();
+    const processStartTime = Date.now();
+    const heartbeatInterval = setInterval(() => {
+      const timeSinceLastOutput = Date.now() - lastOutputTime;
+      const totalTime = Date.now() - processStartTime;
+      if (timeSinceLastOutput > 30000 && !child.killed) { // 30 seconds without output
+        // Check if process is actually still running by checking if it has a PID
+        const isRunning = child.killed === false && child.exitCode === null;
+        console.warn(`[${jobId}] FFmpeg has not produced output for ${Math.round(timeSinceLastOutput / 1000)}s (total: ${Math.round(totalTime / 1000)}s), process running: ${isRunning}`);
+        console.warn(`[${jobId}] Last stderr: ${errorOutput.slice(-500)}`);
+        if (totalTime > 300000) { // 5 minutes total
+          console.error(`[${jobId}] FFmpeg has been running for 5+ minutes without completion - likely hung`);
+        }
+      }
+    }, 10000); // Check every 10 seconds
+    
+    const timeout = setTimeout(() => {
+      clearInterval(heartbeatInterval);
+      if (!child.killed) {
+        console.error(`[${jobId}] FFmpeg process timeout after 5 minutes - killing process`);
+        console.error(`[${jobId}] Last stderr output: ${errorOutput.slice(-1000)}`);
+        child.kill('SIGKILL');
+        reject(new Error(`FFmpeg process timed out after 5 minutes. Last output: ${errorOutput.slice(-500)}`));
+      }
+    }, 5 * 60 * 1000); // 5 minute timeout
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      clearInterval(heartbeatInterval);
+      console.error(`[${jobId}] FFmpeg spawn error:`, err);
+      reject(err);
+    });
+    child.on('exit', code => {
+      clearTimeout(timeout);
+      clearInterval(heartbeatInterval);
+      console.log(`[${jobId}] FFmpeg process exited with code ${code}`);
+      if (code === 0) {
+        // When FFmpeg completes, show 100% progress
+        onProgress(100);
+        if (!hasSeenProgress && duration > 0) {
+          console.warn(`[${jobId}] Warning: No progress updates seen during FFmpeg operation`);
+          // If no progress was seen, log the full stderr to see what happened
+          console.log(`[${jobId}] Full stderr output: ${errorOutput.slice(-2000)}`);
+        }
+        console.log(`[${jobId}] FFmpeg completed successfully, resolving promise`);
+        resolve();
+      } else {
+        // Extract error message from stderr (usually the last few lines contain the actual error)
+        const errorLines = errorOutput.split('\n').filter(line => 
+          line.trim() && 
+          !line.includes('time=') && 
+          !line.includes('frame=') &&
+          !line.includes('fps=') &&
+          !line.includes('bitrate=') &&
+          !line.includes('speed=')
+        );
+        const lastError = errorLines.slice(-5).join('\n') || errorOutput.slice(-500);
+        console.error(`[${jobId}] FFmpeg error details: ${errorOutput}`);
+        reject(new Error(`ffmpeg exited with code ${code}\n${lastError}`));
+      }
+    });
+  });
+}
+
+async function downloadFile(url: string, outputPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(outputPath);
+    
+    protocol.get(url, response => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        // Handle redirects
+        file.close();
+        fs.unlink(outputPath, () => {});
+        return downloadFile(response.headers.location, outputPath).then(resolve).catch(reject);
+      }
+      
+      if (!response.statusCode || (response.statusCode !== 200 && response.statusCode < 300)) {
+        file.close();
+        fs.unlink(outputPath, () => {});
+        reject(new Error(`Failed to download ${url}: ${response.statusCode || 'unknown'}`));
+        return;
+      }
+      
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    }).on('error', err => {
+      file.close();
+      fs.unlink(outputPath, () => {});
+      reject(err);
+    });
+  });
+}
+
+function getImageExtension(url: string): string {
+  // Remove query parameters
+  const cleanUrl = url.split('?')[0] || url;
+  const match = cleanUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
+  return match && match[1] ? match[1].toLowerCase() : 'png';
+}
+
+async function convertWebpToPng(inputPath: string, outputPath: string, jobId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ffmpegPath = ffmpegInstaller.path;
+    const child = spawn(ffmpegPath, [
+      '-hide_banner',
+      '-y',
+      '-i', inputPath,
+      outputPath
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let errorOutput = '';
+    child.stderr?.on('data', (data: Buffer) => {
+      errorOutput += data.toString();
     });
 
     child.on('error', reject);
@@ -352,9 +657,98 @@ function runFfmpegWithProgress(
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`ffmpeg exited with code ${code}`));
+        const errorLines = errorOutput.split('\n').filter(line => 
+          line.trim() && 
+          !line.includes('time=') && 
+          !line.includes('frame=') &&
+          !line.includes('fps=')
+        );
+        const lastError = errorLines.slice(-5).join('\n') || errorOutput.slice(-500);
+        reject(new Error(`Failed to convert webp to PNG: ${lastError}`));
       }
     });
   });
+}
+
+function buildOverlayFilters(
+  overlays: Array<z.infer<typeof overlaySchema>>,
+  imagePaths: string[],
+  videoDuration: number
+): { filterComplex: string; outputStream: string } {
+  if (overlays.length === 0) {
+    return { filterComplex: '', outputStream: '' };
+  }
+
+  const filterParts: string[] = [];
+  let imageInputIndex = 1; // Start at 1 because [0:v] is the video
+  let currentStream = '[0:v]';
+  
+  // Sort overlays by start time for proper chaining
+  const sortedOverlays = [...overlays].sort((a, b) => a.start - b.start);
+  
+  for (const overlay of sortedOverlays) {
+    if (overlay.type === 'text') {
+      const fontSize = overlay.fontSize || 24;
+      const fontColor = overlay.fontColor || 'white';
+      const bgColor = overlay.backgroundColor || 'black@0.5';
+      const opacity = overlay.opacity ?? 1;
+      // Calculate position: x and y are percentages (0-100)
+      // For drawtext, x and y can be expressions like "W*0.1" for 10% from left
+      const x = `W*${overlay.x}/100`;
+      const y = `H*${overlay.y}/100`;
+      
+      // Escape text for ffmpeg
+      const escapedText = overlay.text
+        .replace(/\\/g, '\\\\')
+        .replace(/:/g, '\\:')
+        .replace(/'/g, "\\'")
+        .replace(/\[/g, '\\[')
+        .replace(/\]/g, '\\]')
+        .replace(/,/g, '\\,');
+      
+      // Enable filter only during overlay time range
+      const enable = `between(t,${overlay.start},${overlay.end})`;
+      const outputLabel = `v${filterParts.length + 1}`;
+      filterParts.push(
+        `${currentStream}drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}@${opacity}:box=1:boxcolor=${bgColor}:boxborderw=5:x=${x}:y=${y}:enable='${enable}'[${outputLabel}]`
+      );
+      currentStream = `[${outputLabel}]`;
+    } else if (overlay.type === 'image' && imageInputIndex - 1 < imagePaths.length) {
+      const widthPercent = overlay.width || 20;
+      const heightPercent = overlay.height || 20;
+      const opacity = overlay.opacity ?? 1;
+      // Calculate position - percentages to pixels
+      const x = `W*${overlay.x}/100`;
+      const y = `H*${overlay.y}/100`;
+      
+      // Enable filter only during overlay time range
+      const enable = `between(t,${overlay.start},${overlay.end})`;
+      
+      const imgInput = `[${imageInputIndex}:v]`; // Image is a separate input (1, 2, 3, etc.)
+      const loopedImgLabel = `looped${imageInputIndex}`;
+      const scaledImgLabel = `scaled${imageInputIndex}`;
+      const outputLabel = `v${filterParts.length + 1}`;
+      
+      // Loop the image for the video duration, then scale and overlay it
+      // Use loop filter with a specific duration to avoid infinite loops
+      // Then use scale2ref: [main][ref]scale2ref[scaled_ref][ref_out]
+      // [0:v] is video, [imageInputIndex:v] is the image input
+      // Scale image based on video dimensions using main_w/main_h
+      // Note: scale2ref outputs [scaled_ref][ref_out] where scaled_ref is the scaled reference stream
+      // Loop the image for the full video duration to ensure it's available when needed
+      const loopSize = Math.ceil(videoDuration * 30); // Estimate frames needed (30 fps)
+      filterParts.push(
+        `${imgInput}loop=loop=-1:size=${loopSize}:start=0[${loopedImgLabel}];[0:v][${loopedImgLabel}]scale2ref=w=main_w*${widthPercent}/100:h=main_h*${heightPercent}/100[${scaledImgLabel}][ref${imageInputIndex}];[ref${imageInputIndex}]nullsink;${currentStream}[${scaledImgLabel}]overlay=${x}:${y}:enable='${enable}'[${outputLabel}]`
+      );
+      currentStream = `[${outputLabel}]`;
+      imageInputIndex++;
+    }
+  }
+  
+  // Return the filter complex string and the final output stream label
+  // currentStream is like "[v3]", we need just "v3" for the -map argument
+  const finalOutputStream = currentStream.replace(/^\[|\]$/g, ''); // Remove brackets
+  console.log(`[buildOverlayFilters] Final output stream: ${finalOutputStream}, filter parts: ${filterParts.length}`);
+  return { filterComplex: filterParts.join(';'), outputStream: finalOutputStream };
 }
 
