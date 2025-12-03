@@ -13,6 +13,15 @@ import { ReactiveFormsModule, Validators, FormBuilder } from '@angular/forms';
 import * as dashjs from 'dashjs';
 import { environment } from '../../environments/environment';
 
+interface VideoSource {
+  id: number;
+  url: string;
+  type: 'video' | 'image';
+  duration: number; // Duration in seconds (5s for images)
+  order: number;
+  startTime: number; // Cumulative start time in concatenated timeline
+}
+
 interface TimelineCut {
   id: number;
   start: number;
@@ -87,16 +96,51 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly backendHost = environment.apiBaseUrl;
 
   protected readonly sourceForm = this.fb.nonNullable.group({
-    sourceUrl: ['', [Validators.required]]
+    sourceUrl: ['', [Validators.required]],
+    imageDuration: [5, [Validators.required, Validators.min(0.1), Validators.max(60)]]
+  });
+
+  // Track if current URL is an image
+  protected readonly isImageUrl = computed(() => {
+    const url = this.sourceForm.controls.sourceUrl.value.toLowerCase();
+    return !!url.match(/\.(jpg|jpeg|png|gif|webp)$/);
   });
 
   protected readonly loading = signal(false);
   protected readonly errorMessage = signal('');
+  protected readonly sources = signal<VideoSource[]>([]);
+  protected readonly sourceBoundaries = signal<number[]>([]); // Cumulative timestamps where sources end
   protected readonly duration = signal(0);
   protected readonly currentTime = signal(0);
   protected readonly trimStart = signal(0);
   protected readonly trimEnd = signal(0);
   protected readonly sourceLoaded = signal(false);
+  protected readonly currentSourceIndex = signal(0); // Index of currently playing source
+  protected readonly editingSourceId = signal<number | null>(null); // ID of source being edited
+  
+  private nextSourceId = 1;
+  private isLoadingSource = false;
+  private keyboardListener?: (event: KeyboardEvent) => void;
+
+  constructor() {
+    // Set up keyboard shortcuts for source navigation
+    this.keyboardListener = (event: KeyboardEvent) => {
+      // Only handle if not typing in an input
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' && this.sources().length > 1) {
+        event.preventDefault();
+        this.goToPreviousSource();
+      } else if (event.key === 'ArrowRight' && this.sources().length > 1) {
+        event.preventDefault();
+        this.goToNextSource();
+      }
+    };
+
+    window.addEventListener('keydown', this.keyboardListener);
+  }
   protected readonly cuts = signal<TimelineCut[]>([]);
   protected readonly cutSelection = signal({ start: 0, end: 0 });
   protected readonly overlays = signal<Overlay[]>([]);
@@ -129,9 +173,15 @@ export class VideoEditorComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.dashPlayer?.reset();
+    if (this.keyboardListener) {
+      window.removeEventListener('keydown', this.keyboardListener);
+    }
   }
 
-  protected loadVideo(): void {
+  /**
+   * Add a new source to the timeline
+   */
+  protected async addSource(): Promise<void> {
     this.errorMessage.set('');
     if (this.sourceForm.invalid) {
       this.sourceForm.markAllAsTouched();
@@ -140,16 +190,274 @@ export class VideoEditorComponent implements OnDestroy {
 
     const rawValue = this.sourceForm.controls.sourceUrl.value ?? '';
     const url = rawValue.trim();
-    const video = this.videoElement?.nativeElement;
 
-    if (!url || !video) {
-      this.errorMessage.set('Provide a valid MP4 or MPD url.');
+    if (!url) {
+      this.errorMessage.set('Provide a valid MP4, MPD, or image URL.');
       return;
     }
 
-    this.resetEditor();
+    if (this.isLoadingSource) {
+      this.errorMessage.set('Please wait for the current source to load.');
+      return;
+    }
+
+    // Determine type based on extension
+    const lowerUrl = url.toLowerCase();
+    const isImage = lowerUrl.match(/\.(jpg|jpeg|png|gif|webp)$/);
+    const type: 'video' | 'image' = isImage ? 'image' : 'video';
+
+    this.isLoadingSource = true;
     this.loading.set(true);
+
+    try {
+      // Get duration of the source
+      let duration = 5; // Default 5 seconds for images
+      
+      if (type === 'video') {
+        // Load video metadata to get duration
+        duration = await this.getVideoDuration(url);
+      } else {
+        // Use custom image duration from form
+        duration = this.sourceForm.controls.imageDuration.value || 5;
+      }
+
+      const currentSources = this.sources();
+      const startTime = currentSources.reduce((sum, s) => sum + s.duration, 0);
+
+      const newSource: VideoSource = {
+        id: this.nextSourceId++,
+        url,
+        type,
+        duration,
+        startTime,
+        order: currentSources.length
+      };
+
+      this.sources.update(sources => [...sources, newSource]);
+      this.updateSourceBoundaries();
+      this.sourceForm.reset();
+      
+      // Load the concatenated sources for preview
+      this.loadConcatenatedSources();
+    } catch (error) {
+      this.errorMessage.set(`Failed to load source: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      this.isLoadingSource = false;
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Get duration of a video by loading its metadata
+   */
+  private getVideoDuration(url: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      
+      video.addEventListener('loadedmetadata', () => {
+        if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
+          resolve(video.duration);
+        } else {
+          reject(new Error('Could not determine video duration'));
+        }
+        video.src = '';
+      });
+      
+      video.addEventListener('error', () => {
+        reject(new Error('Failed to load video metadata'));
+        video.src = '';
+      });
+      
+      video.src = url;
+    });
+  }
+
+  /**
+   * Update source boundaries for timeline visualization
+   */
+  private updateSourceBoundaries(): void {
+    const currentSources = this.sources();
+    if (currentSources.length <= 1) {
+      this.sourceBoundaries.set([]);
+      return;
+    }
+
+    // Boundaries are at the end of each source (except the last one)
+    const boundaries = currentSources
+      .slice(0, -1)
+      .map(source => source.startTime + source.duration);
+    
+    this.sourceBoundaries.set(boundaries);
+  }
+
+  /**
+   * Remove a source from the timeline
+   */
+  protected removeSource(id: number): void {
+    this.sources.update(sources => {
+      const filtered = sources.filter(s => s.id !== id);
+      // Re-calculate start times and order
+      return this.recalculateSourceTimings(filtered);
+    });
+    
+    this.updateSourceBoundaries();
+    
+    // Reload if we still have sources
+    if (this.sources().length > 0) {
+      this.loadConcatenatedSources();
+    } else {
+      this.resetEditor(true);
+    }
+  }
+
+  /**
+   * Move a source up in the order
+   */
+  protected moveSourceUp(id: number): void {
+    const currentSources = this.sources();
+    const index = currentSources.findIndex(s => s.id === id);
+    
+    if (index > 0) {
+      const newSources = [...currentSources];
+      [newSources[index - 1], newSources[index]] = [newSources[index], newSources[index - 1]];
+      // Update order and timings
+      const reordered = this.recalculateSourceTimings(newSources);
+      this.sources.set(reordered);
+      this.updateSourceBoundaries();
+      this.loadConcatenatedSources();
+    }
+  }
+
+  /**
+   * Move a source down in the order
+   */
+  protected moveSourceDown(id: number): void {
+    const currentSources = this.sources();
+    const index = currentSources.findIndex(s => s.id === id);
+    
+    if (index < currentSources.length - 1) {
+      const newSources = [...currentSources];
+      [newSources[index], newSources[index + 1]] = [newSources[index + 1], newSources[index]];
+      // Update order and timings
+      const reordered = this.recalculateSourceTimings(newSources);
+      this.sources.set(reordered);
+      this.updateSourceBoundaries();
+      this.loadConcatenatedSources();
+    }
+  }
+
+  /**
+   * Recalculate start times and order for all sources
+   */
+  private recalculateSourceTimings(sources: VideoSource[]): VideoSource[] {
+    let cumulativeTime = 0;
+    return sources.map((source, index) => {
+      const updated = {
+        ...source,
+        order: index,
+        startTime: cumulativeTime
+      };
+      cumulativeTime += source.duration;
+      return updated;
+    });
+  }
+
+  /**
+   * Start editing a source's duration (images only)
+   */
+  protected startEditingSource(id: number): void {
+    this.editingSourceId.set(id);
+  }
+
+  /**
+   * Update a source's duration
+   */
+  protected updateSourceDuration(id: number, newDuration: number): void {
+    const validDuration = Math.max(0.1, Math.min(60, newDuration));
+    
+    this.sources.update(sources => {
+      const updated = sources.map(s => 
+        s.id === id ? { ...s, duration: validDuration } : s
+      );
+      return this.recalculateSourceTimings(updated);
+    });
+    
+    this.updateSourceBoundaries();
+    this.editingSourceId.set(null);
+    this.loadConcatenatedSources();
+  }
+
+  /**
+   * Cancel editing a source
+   */
+  protected cancelEditingSource(): void {
+    this.editingSourceId.set(null);
+  }
+
+  /**
+   * Load and concatenate all sources for preview
+   * Switches between sources during playback to simulate concatenation
+   */
+  protected loadConcatenatedSources(): void {
+    const allSources = this.sources();
+    if (allSources.length === 0) {
+      return;
+    }
+
+    // Calculate total duration
+    const totalDuration = allSources.reduce((sum, s) => sum + s.duration, 0);
+    
+    // Reset state (but don't clear sources)
+    this.cuts.set([]);
+    this.cutSelection.set({ start: 0, end: 0 });
+    this.overlays.set([]);
     this.renderResult.set(null);
+    this.trimStart.set(0);
+    this.trimEnd.set(totalDuration);
+    this.duration.set(totalDuration);
+    this.currentSourceIndex.set(0);
+    
+    // Load the first source
+    this.loadSourceAtIndex(0);
+    this.sourceLoaded.set(true);
+  }
+
+  /**
+   * Load a specific source by index
+   */
+  private loadSourceAtIndex(index: number): void {
+    const allSources = this.sources();
+    if (index < 0 || index >= allSources.length) {
+      return;
+    }
+
+    const source = allSources[index];
+    const video = this.videoElement?.nativeElement;
+    
+    if (!video) {
+      return;
+    }
+
+    // Clean up previous player
+    if (this.dashPlayer) {
+      this.dashPlayer.reset();
+      this.dashPlayer = undefined;
+    }
+
+    // For images, hide video and show image
+    if (source.type === 'image') {
+      console.log(`[Preview] Loading image source: ${source.url}`);
+      video.style.display = 'none';
+      video.pause();
+      video.src = '';
+      this.currentSourceIndex.set(index);
+      return;
+    }
+
+    // For videos, show video element and load
+    video.style.display = 'block';
+    const url = source.url;
     const isMpd = url.toLowerCase().endsWith('.mpd');
 
     if (isMpd) {
@@ -160,13 +468,107 @@ export class VideoEditorComponent implements OnDestroy {
       video.load();
     }
 
-    this.loading.set(false);
-    this.sourceLoaded.set(true);
+    this.currentSourceIndex.set(index);
+  }
+
+  /**
+   * Advance to the next source when current one ends
+   */
+  private advanceToNextSource(): void {
+    const nextIndex = this.currentSourceIndex() + 1;
+    const allSources = this.sources();
+    
+    if (nextIndex < allSources.length) {
+      this.loadSourceAtIndex(nextIndex);
+      
+      // If video is playing, continue playing the next source
+      const video = this.videoElement?.nativeElement;
+      if (video && !video.paused) {
+        setTimeout(() => video.play(), 100);
+      }
+    }
+  }
+
+  /**
+   * Navigate to previous source
+   */
+  protected goToPreviousSource(): void {
+    const currentIndex = this.currentSourceIndex();
+    if (currentIndex > 0) {
+      this.loadSourceAtIndex(currentIndex - 1);
+      const video = this.videoElement?.nativeElement;
+      if (video) {
+        video.currentTime = 0;
+      }
+    }
+  }
+
+  /**
+   * Navigate to next source
+   */
+  protected goToNextSource(): void {
+    const currentIndex = this.currentSourceIndex();
+    const allSources = this.sources();
+    if (currentIndex < allSources.length - 1) {
+      this.loadSourceAtIndex(currentIndex + 1);
+      const video = this.videoElement?.nativeElement;
+      if (video) {
+        video.currentTime = 0;
+      }
+    }
+  }
+
+  /**
+   * Jump to a specific source by its start time (for clicking timeline boundaries)
+   */
+  protected jumpToSourceByTime(time: number): void {
+    const allSources = this.sources();
+    for (let i = 0; i < allSources.length; i++) {
+      const source = allSources[i];
+      if (time >= source.startTime && time < source.startTime + source.duration) {
+        this.loadSourceAtIndex(i);
+        const video = this.videoElement?.nativeElement;
+        if (video) {
+          video.currentTime = time - source.startTime;
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Check if user can navigate to previous source
+   */
+  protected canGoToPreviousSource(): boolean {
+    return this.currentSourceIndex() > 0;
+  }
+
+  /**
+   * Check if user can navigate to next source
+   */
+  protected canGoToNextSource(): boolean {
+    return this.currentSourceIndex() < this.sources().length - 1;
+  }
+
+  /**
+   * Get the current source being previewed
+   */
+  protected getCurrentSource(): VideoSource | undefined {
+    const allSources = this.sources();
+    return allSources[this.currentSourceIndex()];
+  }
+
+  /**
+   * Legacy method - kept for backward compatibility
+   */
+  protected loadVideo(): void {
+    this.addSource();
   }
 
   protected resetEditor(clearSource = false): void {
     if (clearSource) {
       this.sourceForm.reset();
+      this.sources.set([]);
     }
     this.loading.set(false);
     this.sourceLoaded.set(false);
@@ -196,7 +598,12 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected onMetadataLoaded(): void {
-    const duration = this.videoElement?.nativeElement.duration ?? 0;
+    const video = this.videoElement?.nativeElement;
+    if (!video) {
+      return;
+    }
+
+    const duration = video.duration ?? 0;
 
     if (!isFinite(duration) || duration <= 0) {
       this.errorMessage.set(
@@ -205,13 +612,18 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
-    this.duration.set(duration);
-    this.trimStart.set(0);
-    this.trimEnd.set(duration);
-    this.cutSelection.set({
-      start: Math.min(duration * 0.25, duration - this.minGap),
-      end: Math.min(duration * 0.4, duration)
-    });
+    // If we have multiple sources, duration is already set to total
+    // Only update if this is a single source scenario
+    const allSources = this.sources();
+    if (allSources.length === 0 || allSources.length === 1) {
+      this.duration.set(duration);
+      this.trimStart.set(0);
+      this.trimEnd.set(duration);
+      this.cutSelection.set({
+        start: Math.min(duration * 0.25, duration - this.minGap),
+        end: Math.min(duration * 0.4, duration)
+      });
+    }
   }
 
   protected onTimeUpdate(): void {
@@ -219,7 +631,46 @@ export class VideoEditorComponent implements OnDestroy {
     if (!video) {
       return;
     }
-    this.currentTime.set(video.currentTime);
+
+    const allSources = this.sources();
+    const currentIndex = this.currentSourceIndex();
+
+    if (allSources.length === 0) {
+      this.currentTime.set(video.currentTime);
+      return;
+    }
+
+    // Calculate global timeline position
+    const currentSource = allSources[currentIndex];
+    if (currentSource) {
+      // For images, time doesn't advance automatically (static preview)
+      if (currentSource.type === 'image') {
+        // Keep time at the start of the image
+        this.currentTime.set(currentSource.startTime);
+        return;
+      }
+
+      const globalTime = currentSource.startTime + video.currentTime;
+      this.currentTime.set(globalTime);
+
+      // Check if we need to advance to next source
+      if (video.currentTime >= currentSource.duration - 0.1) {
+        this.advanceToNextSource();
+      }
+    } else {
+      this.currentTime.set(video.currentTime);
+    }
+  }
+
+  /**
+   * Handle video ended event
+   */
+  protected onVideoEnded(): void {
+    const currentSource = this.getCurrentSource();
+    // Only auto-advance for videos, not images
+    if (currentSource?.type === 'video') {
+      this.advanceToNextSource();
+    }
   }
 
   protected onVideoError(): void {
@@ -265,7 +716,43 @@ export class VideoEditorComponent implements OnDestroy {
     if (!video) {
       return;
     }
-    video.currentTime = this.clamp(time, 0, this.duration());
+
+    const clampedTime = this.clamp(time, 0, this.duration());
+    const allSources = this.sources();
+
+    // If we have multiple sources, find the correct source and load it
+    if (allSources.length > 1) {
+      // Find which source this time belongs to
+      let targetSourceIndex = 0;
+      let localTime = clampedTime;
+
+      for (let i = 0; i < allSources.length; i++) {
+        const source = allSources[i];
+        if (clampedTime >= source.startTime && clampedTime < source.startTime + source.duration) {
+          targetSourceIndex = i;
+          localTime = clampedTime - source.startTime;
+          break;
+        } else if (i === allSources.length - 1) {
+          // Last source
+          targetSourceIndex = i;
+          localTime = clampedTime - source.startTime;
+        }
+      }
+
+      // Load the target source if not already loaded
+      if (this.currentSourceIndex() !== targetSourceIndex) {
+        this.loadSourceAtIndex(targetSourceIndex);
+        // Wait for video to load, then seek
+        setTimeout(() => {
+          video.currentTime = localTime;
+        }, 200);
+      } else {
+        video.currentTime = localTime;
+      }
+    } else {
+      // Single source or no sources
+      video.currentTime = clampedTime;
+    }
   }
 
   protected setCutStartFromCurrent(): void {
@@ -888,9 +1375,7 @@ export class VideoEditorComponent implements OnDestroy {
       offsetY: overlay.y
     });
     
-    if (event.target instanceof HTMLElement) {
-      event.target.setPointerCapture(event.pointerId);
-    }
+    // Don't set pointer capture - let the movement shield handle it
   }
 
   protected dragOverlay(event: PointerEvent): void {
@@ -935,7 +1420,6 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected startResizeOverlay(overlay: Overlay, event: PointerEvent, corner: 'se' | 'sw' | 'ne' | 'nw'): void {
-    if (overlay.type !== 'image' && overlay.type !== 'shape') return;
     event.preventDefault();
     event.stopPropagation();
     const container = this.playerContainer?.nativeElement;
@@ -945,18 +1429,29 @@ export class VideoEditorComponent implements OnDestroy {
     const startX = event.clientX;
     const startY = event.clientY;
     
-    this.resizingOverlay.set({
-      overlay,
-      startWidth: overlay.width || 20,
-      startHeight: overlay.height || 20,
-      startX,
-      startY,
-      corner
-    });
-    
-    if (event.target instanceof HTMLElement) {
-      event.target.setPointerCapture(event.pointerId);
+    if (overlay.type === 'text') {
+      // For text, track starting font size
+      this.resizingOverlay.set({
+        overlay,
+        startWidth: overlay.fontSize || 24,
+        startHeight: overlay.fontSize || 24,
+        startX,
+        startY,
+        corner
+      });
+    } else {
+      // For images and shapes, track width/height
+      this.resizingOverlay.set({
+        overlay,
+        startWidth: overlay.width || 20,
+        startHeight: overlay.height || 20,
+        startX,
+        startY,
+        corner
+      });
     }
+    
+    // Don't set pointer capture - let the movement shield handle it
   }
 
   protected resizeOverlay(event: PointerEvent): void {
@@ -970,6 +1465,50 @@ export class VideoEditorComponent implements OnDestroy {
     const deltaX = ((event.clientX - resize.startX) / videoBounds.width) * 100;
     const deltaY = ((event.clientY - resize.startY) / videoBounds.height) * 100;
     
+    // For text overlays, adjust fontSize based on distance from starting point
+    if (resize.overlay.type === 'text') {
+      // Calculate diagonal distance (Euclidean distance)
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      
+      // Determine direction based on corner and movement
+      let direction = 1; // 1 = increase, -1 = decrease
+      
+      if (resize.corner === 'se') {
+        // SE: right+down = increase, left+up = decrease
+        direction = (deltaX + deltaY >= 0) ? 1 : -1;
+      } else if (resize.corner === 'sw') {
+        // SW: left+down = increase, right+up = decrease
+        direction = (-deltaX + deltaY >= 0) ? 1 : -1;
+      } else if (resize.corner === 'ne') {
+        // NE: right+up = increase, left+down = decrease
+        direction = (deltaX - deltaY >= 0) ? 1 : -1;
+      } else if (resize.corner === 'nw') {
+        // NW: left+up = increase, right+down = decrease
+        direction = (-deltaX - deltaY >= 0) ? 1 : -1;
+      }
+      
+      // Scale fontSize: 1% screen distance = 2px font size
+      const fontSizeChange = distance * direction * 2;
+      const newFontSize = Math.max(12, Math.min(200, resize.startWidth + fontSizeChange));
+      
+      // Update text overlay (position stays the same for now - SE behavior)
+      const updatedOverlays = this.overlays().map(o => 
+        o.id === resize.overlay.id && o.type === 'text'
+          ? { ...o, fontSize: newFontSize }
+          : o
+      );
+      this.overlays.set(updatedOverlays);
+      
+      // Update form input if form is open
+      if (this.overlayFormContainer?.nativeElement && this.showOverlayForm()) {
+        const formContainer = this.overlayFormContainer.nativeElement;
+        const fontSizeInput = formContainer.querySelector<HTMLInputElement>('#textFontSize');
+        if (fontSizeInput) fontSizeInput.value = Math.round(newFontSize).toString();
+      }
+      return;
+    }
+    
+    // For images and shapes, adjust width/height
     let newWidth = resize.startWidth;
     let newHeight = resize.startHeight;
     let newX = resize.overlay.x;
@@ -1030,14 +1569,18 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
-    const sourceUrl = this.sourceForm.controls.sourceUrl.value?.trim() ?? '';
-    if (!sourceUrl) {
-      this.errorMessage.set('Provide a source URL first.');
+    const allSources = this.sources();
+    if (allSources.length === 0) {
+      this.errorMessage.set('Add at least one source before rendering.');
       return;
     }
 
     const payload = {
-      sourceUrl,
+      sources: allSources.map(s => ({ 
+        url: s.url, 
+        type: s.type,
+        duration: s.type === 'image' ? s.duration : undefined
+      })),
       trimStart: this.trimStart(),
       trimEnd: this.trimEnd(),
       cuts: this.cuts().map(({ start, end }) => ({ start, end })),

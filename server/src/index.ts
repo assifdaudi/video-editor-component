@@ -66,8 +66,16 @@ const shapeOverlaySchema = z.object({
 
 const overlaySchema = z.discriminatedUnion('type', [textOverlaySchema, imageOverlaySchema, shapeOverlaySchema]);
 
+const sourceSchema = z.object({
+  url: z.string().url(),
+  type: z.enum(['video', 'image']),
+  duration: z.number().min(0.1).optional() // For images, custom duration in seconds
+});
+
 const requestSchema = z.object({
-  sourceUrl: z.string().url(),
+  sources: z.array(sourceSchema).min(1),
+  // Legacy support for single sourceUrl
+  sourceUrl: z.string().url().optional(),
   trimStart: z.number().min(0),
   trimEnd: z.number().positive(),
   cuts: z
@@ -103,6 +111,14 @@ app.post('/api/render', async (req, res) => {
     return res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
   }
   const body = parsed.data;
+  
+  // Convert legacy sourceUrl to sources array
+  const sources = body.sources || (body.sourceUrl ? [{ url: body.sourceUrl, type: 'video' as const }] : []);
+  
+  if (sources.length === 0) {
+    return res.status(400).json({ error: 'At least one source is required' });
+  }
+  
   if (body.trimStart >= body.trimEnd) {
     return res.status(400).json({ error: 'trimStart must be before trimEnd' });
   }
@@ -115,6 +131,9 @@ app.post('/api/render', async (req, res) => {
   const jobId = uuid();
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), `video-job-${jobId}-`));
   const segmentPaths: string[] = [];
+  
+  // Store concatenated source if multiple sources are provided
+  let sourceUrl = sources[0]?.url || '';
 
   // Calculate total duration for progress tracking
   const totalDuration = keepSegments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
@@ -129,9 +148,76 @@ app.post('/api/render', async (req, res) => {
   try {
     await ensureDir(OUTPUT_DIR);
 
-    console.log(`[${jobId}] Starting render: ${keepSegments.length} segment(s), total duration: ${totalDuration.toFixed(2)}s`);
+    console.log(`[${jobId}] Starting render with ${sources.length} source(s): ${keepSegments.length} segment(s), total duration: ${totalDuration.toFixed(2)}s`);
     process.stdout.write(`\r[${jobId}] Progress: 1%`);
     lastDisplayedProgress = 1;
+
+    // If multiple sources, concatenate them first
+    if (sources.length > 1) {
+      console.log(`[${jobId}] Concatenating ${sources.length} sources...`);
+      const concatListPath = path.join(tempDir, 'concat-list.txt');
+      const concatenatedPath = path.join(tempDir, 'concatenated.mp4');
+      
+      // Download all sources first
+      const sourcePaths: string[] = [];
+      for (const [index, source] of sources.entries()) {
+        const sourcePath = path.join(tempDir, `source-${index}.mp4`);
+        console.log(`[${jobId}] Downloading source ${index + 1}/${sources.length}...`);
+        
+        if (source.type === 'image') {
+          // For images, create a video from the image with custom duration
+          // Add silent audio track to match video sources
+          const imageDuration = source.duration || 5; // Default to 5 seconds if not specified
+          await downloadFile(source.url, sourcePath.replace('.mp4', '.jpg'));
+          await runFfmpeg([
+            '-hide_banner',
+            '-y',
+            '-loop', '1',
+            '-i', sourcePath.replace('.mp4', '.jpg'),
+            '-f', 'lavfi',
+            '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+            '-c:v', 'libx264',
+            '-t', String(imageDuration),
+            '-pix_fmt', 'yuv420p',
+            '-r', '25',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-shortest',
+            sourcePath
+          ]);
+        } else {
+          await downloadFile(source.url, sourcePath);
+        }
+        
+        sourcePaths.push(sourcePath);
+      }
+      
+      // Create concat list file with absolute paths
+      // Escape single quotes and wrap paths in quotes for FFmpeg
+      const concatLines = sourcePaths.map(p => {
+        // Convert Windows backslashes to forward slashes for FFmpeg
+        const normalizedPath = p.replace(/\\/g, '/');
+        // Escape single quotes in the path
+        const escapedPath = normalizedPath.replace(/'/g, "'\\''");
+        return `file '${escapedPath}'`;
+      }).join('\n');
+      await fsp.writeFile(concatListPath, concatLines, 'utf-8');
+      
+      // Concatenate all sources
+      console.log(`[${jobId}] Concatenating sources...`);
+      await runFfmpeg([
+        '-hide_banner',
+        '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', concatListPath,
+        '-c', 'copy',
+        concatenatedPath
+      ]);
+      
+      sourceUrl = concatenatedPath;
+      console.log(`[${jobId}] Sources concatenated successfully`);
+    }
 
     for (const [index, segment] of keepSegments.entries()) {
       const segmentPath = path.join(tempDir, `segment-${index}.mp4`);
@@ -149,7 +235,7 @@ app.post('/api/render', async (req, res) => {
           '-ss',
           segment.start.toFixed(3),
           '-i',
-          body.sourceUrl,
+          sourceUrl,
           '-t',
           duration.toFixed(3),
           '-avoid_negative_ts',
@@ -723,9 +809,13 @@ function buildOverlayFilters(
       const bgColor = overlay.backgroundColor || 'black@0.5';
       const opacity = overlay.opacity ?? 1;
       // Calculate position: x and y are percentages (0-100)
-      // For drawtext, x and y can be expressions like "W*0.1" for 10% from left
+      // FFmpeg drawtext: y is from TOP of video (0 = top, H = bottom)
+      // Our UI uses CSS top positioning which also goes from top
+      // But we need to account for text height - drawtext y is for the baseline/top of text
       const x = `W*${overlay.x}/100`;
       const y = `H*${overlay.y}/100`;
+      
+      console.log(`[Text Overlay Debug] Received: x=${overlay.x}%, y=${overlay.y}%, text="${overlay.text}"`);
       
       // Escape text for ffmpeg
       const escapedText = overlay.text
