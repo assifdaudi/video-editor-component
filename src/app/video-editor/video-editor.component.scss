@@ -257,23 +257,54 @@
   transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
   
   &.overlay-preview--text {
-    background: rgba(0, 0, 0, 0.5);
-    border: 2px solid rgba(59, 130, 246, 0.6);
+    background: transparent; // Use the actual text background color
+    border: none;
     white-space: nowrap;
+    padding: 0.5rem; // Keep padding for text only
   }
   
   &.overlay-preview--image {
-    border: 2px solid rgba(168, 85, 247, 0.6);
-    background: rgba(0, 0, 0, 0.3);
+    border: none; // No bounding box - the image itself is the boundary
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 0;
     
     img {
       max-width: 100%;
       max-height: 100%;
       display: block;
       object-fit: contain;
+    }
+  }
+  
+  &.overlay-preview--shape {
+    padding: 0;
+  }
+  
+  // Circle shapes: make the div itself circular
+  &.overlay-preview--shape-circle {
+    border-radius: 50%;
+  }
+  
+  // Rectangle shapes: default rectangular (no border-radius)
+  &.overlay-preview--shape-rectangle {
+    border-radius: 0;
+  }
+  
+  // Arrow shapes: contain SVG
+  &.overlay-preview--shape-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important; // Arrows don't use background
+    border: none !important; // Arrows are drawn with SVG only
+    
+    .overlay-preview__shape-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
   }
   
@@ -285,6 +316,8 @@
   
   &:hover {
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    outline: 1px dashed rgba(59, 130, 246, 0.4); // Subtle outline on hover only
+    outline-offset: 2px;
   }
 
   &--resizing {
@@ -723,9 +756,47 @@ button.primary {
   }
 }
 
+.render-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.render-result__info {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-quiet);
+}
+
+.render-result__player {
+  width: 100%;
+  max-width: 1200px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-muted);
+}
+
+.render-result__video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 .download-link {
   font-weight: 600;
   color: var(--accent);
   text-decoration: none;
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 0.9;
+  }
 }
 

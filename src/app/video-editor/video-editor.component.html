@@ -83,16 +83,22 @@
         class="overlay-preview"
         [class.overlay-preview--text]="overlay.type === 'text'"
         [class.overlay-preview--image]="overlay.type === 'image'"
+        [class.overlay-preview--shape]="overlay.type === 'shape'"
+        [class.overlay-preview--shape-circle]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'circle'"
+        [class.overlay-preview--shape-rectangle]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'rectangle'"
+        [class.overlay-preview--shape-arrow]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'arrow'"
         [class.overlay-preview--dragging]="draggingOverlay()?.overlay?.id === overlay.id"
         [class.overlay-preview--resizing]="resizingOverlay()?.overlay?.id === overlay.id"
-        [style.left.%]="overlay.x"
-        [style.top.%]="overlay.y"
+        [style.left.%]="getOverlayLeftInContainer(overlay)"
+        [style.top.%]="getOverlayTopInContainer(overlay)"
         [style.font-size.px]="overlay.type === 'text' ? getTextOverlayFontSize(overlay) : null"
         [style.color]="overlay.type === 'text' ? getTextOverlayFontColor(overlay) : null"
-        [style.background-color]="overlay.type === 'text' ? getTextOverlayBgColor(overlay) : null"
+        [style.background-color]="overlay.type === 'shape' && getShapeOverlayFill(overlay) ? getShapeOverlayColor(overlay) : (overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? getTextOverlayBgColor(overlay) : null)"
         [style.opacity]="overlay.opacity ?? 1"
-        [style.width.%]="overlay.type === 'image' ? getImageOverlayWidth(overlay) : null"
-        [style.height.%]="overlay.type === 'image' ? getImageOverlayHeight(overlay) : null"
+        [style.width.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayWidthInContainer(overlay) : null"
+        [style.height.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayHeightInContainer(overlay) : null"
+        [style.border]="overlay.type === 'shape' && !getShapeOverlayFill(overlay) ? (getShapeOverlayStrokeWidth(overlay) + 'px solid ' + getShapeOverlayColor(overlay)) : null"
+        [style.box-sizing]="overlay.type === 'shape' ? 'border-box' : null"
         (pointerdown)="startDragOverlay(overlay, $event)"
         (pointermove)="resizingOverlay() ? resizeOverlay($event) : dragOverlay($event)"
         (pointerup)="stopDragOverlay(); stopResizeOverlay()"
@@ -100,9 +106,25 @@
       >
         <span *ngIf="overlay.type === 'text'">{{ getOverlayText(overlay) }}</span>
         <img *ngIf="overlay.type === 'image'" [src]="getOverlayImageUrl(overlay)" alt="Overlay" />
-        <!-- Resize handles for images -->
+        <!-- Arrow shape uses SVG, others use CSS -->
+        <svg 
+          *ngIf="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'arrow'" 
+          class="overlay-preview__shape-svg" 
+          [attr.viewBox]="'0 0 100 100'"
+          preserveAspectRatio="none"
+        >
+          <path
+            d="M 5 50 L 75 50 M 65 35 L 80 50 L 65 65"
+            [attr.fill]="getShapeOverlayFill(overlay) ? getShapeOverlayColor(overlay) : 'none'"
+            [attr.stroke]="getShapeOverlayColor(overlay)"
+            [attr.stroke-width]="getShapeOverlayStrokeWidth(overlay)"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <!-- Resize handles for images and shapes -->
         <div
-          *ngIf="overlay.type === 'image'"
+          *ngIf="overlay.type === 'image' || overlay.type === 'shape'"
           class="overlay-preview__resize-handles"
         >
           <div
@@ -255,11 +277,12 @@
       <div class="overlays-panel__actions">
         <button type="button" (click)="openOverlayForm('text')">Add Text</button>
         <button type="button" (click)="openOverlayForm('image')">Add Image</button>
+        <button type="button" (click)="openOverlayForm('shape')">Add Shape</button>
       </div>
     </div>
 
     <div class="overlay-form" *ngIf="showOverlayForm()" #overlayFormContainer>
-      <h3>Add {{ overlayFormType() === 'text' ? 'Text' : 'Image' }} Overlay</h3>
+      <h3>Add {{ overlayFormType() === 'text' ? 'Text' : overlayFormType() === 'image' ? 'Image' : 'Shape' }} Overlay</h3>
       
       <div class="field-grid" *ngIf="overlayFormType() === 'text'">
         <label>
@@ -294,6 +317,10 @@
         <label>
           Background Color
           <input type="color" id="textBgColor" value="#000000" />
+        </label>
+        <label style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" id="textBgTransparent" />
+          <span>Transparent background</span>
         </label>
         <label>
           Opacity (0-1)
@@ -337,6 +364,57 @@
         </label>
       </div>
 
+      <div class="field-grid" *ngIf="overlayFormType() === 'shape'">
+        <label>
+          Shape Type
+          <select id="shapeType">
+            <option value="circle">Circle</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="arrow">Arrow</option>
+          </select>
+        </label>
+        <label>
+          Start (sec)
+          <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />
+        </label>
+        <label>
+          End (sec)
+          <input type="number" id="overlayEnd" step="0.1" [value]="currentTime() + 5" />
+        </label>
+        <label>
+          X Position (%)
+          <input type="number" id="overlayX" step="1" min="0" max="100" value="10" readonly />
+        </label>
+        <label>
+          Y Position (%)
+          <input type="number" id="overlayY" step="1" min="0" max="100" value="10" readonly />
+        </label>
+        <p class="hint-text">💡 Drag the shape overlay on the video to position it</p>
+        <label>
+          Width (%)
+          <input type="number" id="shapeWidth" step="1" min="1" max="100" value="20" />
+        </label>
+        <label>
+          Height (%)
+          <input type="number" id="shapeHeight" step="1" min="1" max="100" value="20" />
+        </label>
+        <label>
+          Color
+          <input type="color" id="shapeColor" value="#FF0000" />
+        </label>
+        <label>
+          Stroke Width
+          <input type="number" id="shapeStrokeWidth" step="1" min="1" max="20" value="3" />
+        </label>
+        <label>
+          <input type="checkbox" id="shapeFill" /> Fill shape
+        </label>
+        <label>
+          Opacity (0-1)
+          <input type="number" id="shapeOpacity" step="0.1" min="0" max="1" value="1" />
+        </label>
+      </div>
+
       <div class="hint">
         <button type="button" (click)="closeOverlayForm()">Cancel</button>
         <button
@@ -355,6 +433,14 @@
         >
           Add Image Overlay
         </button>
+        <button
+          type="button"
+          class="primary"
+          *ngIf="overlayFormType() === 'shape'"
+          (click)="addShapeOverlayFromForm()"
+        >
+          Add Shape Overlay
+        </button>
       </div>
     </div>
 
@@ -363,12 +449,13 @@
       <ul class="overlays" *ngIf="hasOverlays(); else noOverlays">
         <li *ngFor="let overlay of overlays()">
           <div class="overlays__info">
-            <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : '🖼️ Image' }}</span>
+            <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : overlay.type === 'image' ? '🖼️ Image' : '🔷 Shape' }}</span>
             <span class="overlays__times">
               {{ formatTime(overlay.start) }} – {{ formatTime(overlay.end) }}
             </span>
             <small *ngIf="overlay.type === 'text'">{{ getOverlayText(overlay) }}</small>
             <small *ngIf="overlay.type === 'image'">{{ getOverlayImageUrl(overlay) }}</small>
+            <small *ngIf="overlay.type === 'shape'">{{ getOverlayTitle(overlay) }}</small>
           </div>
           <div class="overlays__actions">
             <button type="button" (click)="focusOverlay(overlay)">Preview</button>
@@ -411,17 +498,28 @@
       >
         {{ renderBusy() ? 'Rendering…' : 'Send to backend' }}
       </button>
-      <p *ngIf="renderResult(); else noRender">
-        Job {{ renderResult()?.jobId }} ready:
+      <div *ngIf="renderResult(); else noRender" class="render-result">
+        <p class="render-result__info">
+          Job {{ renderResult()?.jobId }} ready
+        </p>
+        <div class="render-result__player" *ngIf="renderDownloadUrl()">
+          <video
+            #renderedVideo
+            [src]="renderDownloadUrl() || undefined"
+            controls
+            class="render-result__video"
+          ></video>
+        </div>
         <a
           class="download-link"
           [href]="renderDownloadUrl() || undefined"
+          download
           target="_blank"
           rel="noopener"
         >
           Download output
         </a>
-      </p>
+      </div>
       <ng-template #noRender>
         <p class="muted">No server job yet.</p>
       </ng-template>

@@ -48,7 +48,23 @@ const imageOverlaySchema = z.object({
   opacity: z.number().min(0).max(1).optional()
 });
 
-const overlaySchema = z.discriminatedUnion('type', [textOverlaySchema, imageOverlaySchema]);
+const shapeOverlaySchema = z.object({
+  id: z.number(),
+  type: z.literal('shape'),
+  shapeType: z.enum(['circle', 'rectangle', 'arrow']),
+  start: z.number().min(0),
+  end: z.number().positive(),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  width: z.number().min(1).max(100).optional(),
+  height: z.number().min(1).max(100).optional(),
+  color: z.string().optional(),
+  strokeWidth: z.number().min(1).max(20).optional(),
+  fill: z.boolean().optional(),
+  opacity: z.number().min(0).max(1).optional()
+});
+
+const overlaySchema = z.discriminatedUnion('type', [textOverlaySchema, imageOverlaySchema, shapeOverlaySchema]);
 
 const requestSchema = z.object({
   sourceUrl: z.string().url(),
@@ -397,6 +413,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function hexToRgb(hex: string, opacity: number): string {
+  // Remove # if present
+  hex = hex.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  // FFmpeg format: 0xRRGGBB or 0xRRGGBBAA
+  if (opacity < 1) {
+    const a = Math.round(opacity * 255);
+    return `0x${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}${a.toString(16).padStart(2, '0')}`;
+  }
+  return `0x${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 async function ensureDir(dir: string): Promise<void> {
   await fsp.mkdir(dir, { recursive: true });
 }
@@ -709,9 +739,20 @@ function buildOverlayFilters(
       // Enable filter only during overlay time range
       const enable = `between(t,${overlay.start},${overlay.end})`;
       const outputLabel = `v${filterParts.length + 1}`;
-      filterParts.push(
-        `${currentStream}drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}@${opacity}:box=1:boxcolor=${bgColor}:boxborderw=5:x=${x}:y=${y}:enable='${enable}'[${outputLabel}]`
-      );
+      
+      // Check if background should be transparent
+      const hasTransparentBg = !bgColor || bgColor === 'transparent' || bgColor === 'none' || bgColor === '';
+      if (hasTransparentBg) {
+        // No box, just text
+        filterParts.push(
+          `${currentStream}drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}@${opacity}:x=${x}:y=${y}:enable='${enable}'[${outputLabel}]`
+        );
+      } else {
+        // Text with background box
+        filterParts.push(
+          `${currentStream}drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}@${opacity}:box=1:boxcolor=${bgColor}:boxborderw=5:x=${x}:y=${y}:enable='${enable}'[${outputLabel}]`
+        );
+      }
       currentStream = `[${outputLabel}]`;
     } else if (overlay.type === 'image' && imageInputIndex - 1 < imagePaths.length) {
       const widthPercent = overlay.width || 20;
@@ -742,6 +783,106 @@ function buildOverlayFilters(
       );
       currentStream = `[${outputLabel}]`;
       imageInputIndex++;
+    } else if (overlay.type === 'shape') {
+      const widthPercent = overlay.width || 20;
+      const heightPercent = overlay.height || 20;
+      console.log(`[buildOverlayFilters] Shape overlay: type=${overlay.shapeType}, x=${overlay.x}%, y=${overlay.y}%, width=${widthPercent}%, height=${heightPercent}%, fill=${overlay.fill || false}, strokeWidth=${overlay.strokeWidth || 3}`);
+      const color = overlay.color || '#FF0000';
+      const strokeWidth = overlay.strokeWidth || 3;
+      const fill = overlay.fill || false;
+      const opacity = overlay.opacity ?? 1;
+      
+      // Convert hex color to RGB for FFmpeg
+      const rgbColor = hexToRgb(color, opacity);
+      
+      // Calculate position - drawbox uses 'iw' (input width) and 'ih' (input height)
+      // The bounding box IS the shape (no padding)
+      const drawboxX = `iw*${overlay.x}/100`;
+      const drawboxY = `ih*${overlay.y}/100`;
+      const drawboxWidth = `iw*${widthPercent}/100`;
+      const drawboxHeight = `ih*${heightPercent}/100`;
+      
+      const enable = `between(t,${overlay.start},${overlay.end})`;
+      const outputLabel = `v${filterParts.length + 1}`;
+      
+      if (overlay.shapeType === 'rectangle') {
+        // For rectangles, use same approach as circles: color source + overlay for time-based visibility
+        const colorLabel = `colorRect${filterParts.length}`;
+        const scaledLabel = `scaledRect${filterParts.length}`;
+        const boxLabel = `boxRect${filterParts.length}`;
+        const refLabel = `refRect${filterParts.length}`;
+        const chromaLabel = `chromaRect${filterParts.length}`;
+        const thickness = fill ? -1 : strokeWidth;
+        
+        if (fill) {
+          // Filled rectangle: draw directly on video without intermediate canvas
+          filterParts.push(
+            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
+          );
+        } else {
+          // Stroked rectangle: draw border directly on video
+          filterParts.push(
+            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
+          );
+        }
+      } else if (overlay.shapeType === 'circle') {
+        // For circles, use minimum dimension for both width and height to create a square
+        const sizePercent = Math.min(widthPercent, heightPercent);
+        const circleSize = `iw*${sizePercent}/100`;
+        
+        const thickness = fill ? -1 : strokeWidth;
+        
+        if (fill) {
+          // Filled circle: draw directly on video (square approximation)
+          filterParts.push(
+            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${circleSize}:h=${circleSize}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
+          );
+        } else {
+          // Stroked circle: draw border directly on video (square approximation)
+          filterParts.push(
+            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${circleSize}:h=${circleSize}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
+          );
+        }
+      } else if (overlay.shapeType === 'arrow') {
+        // For arrows, use the full bounding box
+        // Arrow shaft: horizontal line (75% of width, centered vertically, thin)
+        // Arrow head: rectangle (20% of width, full height)
+        const shaftWidthPercent = widthPercent * 0.75;
+        const headWidthPercent = widthPercent * 0.20;
+        const shaftHeightPercent = Math.max(heightPercent * 0.15, 0.5); // Thin line, min 0.5%
+        const headHeightPercent = heightPercent;
+        
+        // Shaft position: left side, centered vertically
+        const shaftX = `iw*${overlay.x}/100`;
+        const shaftY = `ih*${overlay.y + heightPercent/2 - shaftHeightPercent/2}/100`;
+        const shaftW = `iw*${shaftWidthPercent}/100`;
+        const shaftH = `ih*${shaftHeightPercent}/100`;
+        
+        // Head position: right side of shaft, full height
+        const headX = `iw*${overlay.x + shaftWidthPercent}/100`;
+        const headY = `ih*${overlay.y}/100`;
+        const headW = `iw*${headWidthPercent}/100`;
+        const headH = `ih*${headHeightPercent}/100`;
+        
+        const shaftLabel = `shaftArrow${filterParts.length}`;
+        const headLabel = `headArrow${filterParts.length}`;
+        
+        console.log(`[buildOverlayFilters] Arrow: shaft=(${shaftX}, ${shaftY}, ${shaftW}, ${shaftH}), head=(${headX}, ${headY}, ${headW}, ${headH})`);
+        
+        if (fill) {
+          // Filled arrow: draw shaft and head directly on video
+          filterParts.push(
+            `${currentStream}drawbox=x=${shaftX}:y=${shaftY}:w=${shaftW}:h=${shaftH}:color=${rgbColor}:t=-1:enable='${enable}'[${shaftLabel}];[${shaftLabel}]drawbox=x=${headX}:y=${headY}:w=${headW}:h=${headH}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
+          );
+        } else {
+          // Stroked arrow: draw shaft and head borders directly on video
+          const thickness = strokeWidth;
+          filterParts.push(
+            `${currentStream}drawbox=x=${shaftX}:y=${shaftY}:w=${shaftW}:h=${shaftH}:color=${rgbColor}:t=${thickness}:enable='${enable}'[${shaftLabel}];[${shaftLabel}]drawbox=x=${headX}:y=${headY}:w=${headW}:h=${headH}:color=${rgbColor}:t=${thickness}:enable='${enable}'[${outputLabel}]`
+          );
+        }
+      }
+      currentStream = `[${outputLabel}]`;
     }
   }
   

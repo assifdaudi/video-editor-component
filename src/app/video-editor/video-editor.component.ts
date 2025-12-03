@@ -46,7 +46,23 @@ interface ImageOverlay {
   opacity?: number;
 }
 
-type Overlay = TextOverlay | ImageOverlay;
+interface ShapeOverlay {
+  id: number;
+  type: 'shape';
+  shapeType: 'circle' | 'rectangle' | 'arrow';
+  start: number;
+  end: number;
+  x: number; // 0-100 percentage
+  y: number; // 0-100 percentage
+  width?: number; // 0-100 percentage
+  height?: number; // 0-100 percentage
+  color?: string;
+  strokeWidth?: number;
+  fill?: boolean;
+  opacity?: number;
+}
+
+type Overlay = TextOverlay | ImageOverlay | ShapeOverlay;
 
 interface RenderResponse {
   jobId: string;
@@ -86,7 +102,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly overlays = signal<Overlay[]>([]);
   protected readonly overlaySelection = signal<Overlay | null>(null);
   protected readonly showOverlayForm = signal(false);
-  protected readonly overlayFormType = signal<'text' | 'image'>('text');
+  protected readonly overlayFormType = signal<'text' | 'image' | 'shape'>('text');
   protected readonly renderBusy = signal(false);
   protected readonly renderResult = signal<RenderResponse | null>(null);
   protected readonly timelineSelection = signal<{ start: number; end: number } | null>(null);
@@ -444,7 +460,7 @@ export class VideoEditorComponent implements OnDestroy {
     return this.clamp(clampedRatio * this.duration(), 0, this.duration());
   }
 
-  protected openOverlayForm(type: 'text' | 'image'): void {
+  protected openOverlayForm(type: 'text' | 'image' | 'shape'): void {
     this.overlayFormType.set(type);
     this.showOverlayForm.set(true);
     this.overlaySelection.set(null);
@@ -466,6 +482,7 @@ export class VideoEditorComponent implements OnDestroy {
     const xInput = container.querySelector<HTMLInputElement>('#textX');
     const yInput = container.querySelector<HTMLInputElement>('#textY');
     const fontSizeInput = container.querySelector<HTMLInputElement>('#textFontSize');
+    const bgTransparentCheckbox = container.querySelector<HTMLInputElement>('#textBgTransparent');
     const fontColorInput = container.querySelector<HTMLInputElement>('#textFontColor');
     const bgColorInput = container.querySelector<HTMLInputElement>('#textBgColor');
     const opacityInput = container.querySelector<HTMLInputElement>('#textOpacity');
@@ -481,7 +498,7 @@ export class VideoEditorComponent implements OnDestroy {
     const y = Number(yInput.value) || 10;
     const fontSize = Number(fontSizeInput.value) || 24;
     const fontColor = fontColorInput.value || '#FFFFFF';
-    const backgroundColor = bgColorInput.value || 'transparent';
+    const backgroundColor = bgTransparentCheckbox?.checked ? 'transparent' : (bgColorInput.value || '#000000');
     const opacity = Number(opacityInput.value) || 1;
 
     this.addTextOverlay(text, start, end, x, y, fontSize, fontColor, backgroundColor, opacity);
@@ -594,6 +611,81 @@ export class VideoEditorComponent implements OnDestroy {
     this.errorMessage.set('');
   }
 
+  protected addShapeOverlayFromForm(): void {
+    if (!this.overlayFormContainer?.nativeElement) {
+      return;
+    }
+    const container = this.overlayFormContainer.nativeElement;
+    const shapeTypeSelect = container.querySelector<HTMLSelectElement>('#shapeType');
+    const startInput = container.querySelector<HTMLInputElement>('#overlayStart');
+    const endInput = container.querySelector<HTMLInputElement>('#overlayEnd');
+    const xInput = container.querySelector<HTMLInputElement>('#overlayX');
+    const yInput = container.querySelector<HTMLInputElement>('#overlayY');
+    const widthInput = container.querySelector<HTMLInputElement>('#shapeWidth');
+    const heightInput = container.querySelector<HTMLInputElement>('#shapeHeight');
+    const colorInput = container.querySelector<HTMLInputElement>('#shapeColor');
+    const strokeWidthInput = container.querySelector<HTMLInputElement>('#shapeStrokeWidth');
+    const fillInput = container.querySelector<HTMLInputElement>('#shapeFill');
+    const opacityInput = container.querySelector<HTMLInputElement>('#shapeOpacity');
+
+    if (!shapeTypeSelect || !startInput || !endInput || !xInput || !yInput || !widthInput || !heightInput || !colorInput || !strokeWidthInput || !fillInput || !opacityInput) {
+      return;
+    }
+
+    const shapeType = shapeTypeSelect.value as 'circle' | 'rectangle' | 'arrow';
+    const start = Number(startInput.value) || 0;
+    const end = Number(endInput.value) || 0;
+    const x = Number(xInput.value) || 10;
+    const y = Number(yInput.value) || 10;
+    const width = Number(widthInput.value) || 20;
+    const height = Number(heightInput.value) || 20;
+    const color = colorInput.value || '#FF0000';
+    const strokeWidth = Number(strokeWidthInput.value) || 3;
+    const fill = fillInput.checked;
+    const opacity = Number(opacityInput.value) || 1;
+
+    this.addShapeOverlay(shapeType, start, end, x, y, width, height, color, strokeWidth, fill, opacity);
+  }
+
+  private addShapeOverlay(
+    shapeType: 'circle' | 'rectangle' | 'arrow',
+    start: number,
+    end: number,
+    x: number,
+    y: number,
+    width = 20,
+    height = 20,
+    color = '#FF0000',
+    strokeWidth = 3,
+    fill = false,
+    opacity = 1
+  ): void {
+    if (start >= end || end > this.duration()) {
+      this.errorMessage.set('Invalid overlay parameters.');
+      return;
+    }
+
+    const overlay: ShapeOverlay = {
+      id: ++this.overlayCounter,
+      type: 'shape',
+      shapeType,
+      start: this.clamp(start, 0, this.duration()),
+      end: this.clamp(end, start + 0.1, this.duration()),
+      x: this.clamp(x, 0, 100),
+      y: this.clamp(y, 0, 100),
+      width: this.clamp(width, 1, 100),
+      height: this.clamp(height, 1, 100),
+      color,
+      strokeWidth: this.clamp(strokeWidth, 1, 20),
+      fill,
+      opacity: this.clamp(opacity, 0, 1)
+    };
+
+    this.overlays.set([...this.overlays(), overlay].sort((a, b) => a.start - b.start));
+    this.closeOverlayForm();
+    this.errorMessage.set('');
+  }
+
   protected removeOverlay(id: number): void {
     this.overlays.set(this.overlays().filter(overlay => overlay.id !== id));
   }
@@ -610,6 +702,9 @@ export class VideoEditorComponent implements OnDestroy {
     if (overlay.type === 'text') {
       return overlay.text;
     }
+    if (overlay.type === 'shape') {
+      return `${overlay.shapeType.charAt(0).toUpperCase() + overlay.shapeType.slice(1)} shape`;
+    }
     return 'Image overlay';
   }
 
@@ -625,6 +720,22 @@ export class VideoEditorComponent implements OnDestroy {
       return overlay.imageUrl;
     }
     return '';
+  }
+
+  protected getShapeOverlayType(overlay: Overlay): 'circle' | 'rectangle' | 'arrow' | null {
+    return overlay.type === 'shape' ? overlay.shapeType : null;
+  }
+
+  protected getShapeOverlayColor(overlay: Overlay): string {
+    return overlay.type === 'shape' ? (overlay.color || '#FF0000') : '#FF0000';
+  }
+
+  protected getShapeOverlayStrokeWidth(overlay: Overlay): number {
+    return overlay.type === 'shape' ? (overlay.strokeWidth || 3) : 3;
+  }
+
+  protected getShapeOverlayFill(overlay: Overlay): boolean {
+    return overlay.type === 'shape' ? (overlay.fill || false) : false;
   }
 
   protected getTextOverlayFontSize(overlay: Overlay): number {
@@ -654,15 +765,120 @@ export class VideoEditorComponent implements OnDestroy {
     );
   }
 
+  /**
+   * Convert overlay position (0-100% relative to video) to container position (0-100% relative to container)
+   */
+  protected getOverlayLeftInContainer(overlay: Overlay): number {
+    const bounds = this.getActualVideoBounds();
+    if (!bounds) return overlay.x;
+    
+    const container = this.playerContainer?.nativeElement;
+    if (!container) return overlay.x;
+    
+    const containerRect = container.getBoundingClientRect();
+    // Convert video percentage to container percentage
+    return ((bounds.x + (overlay.x / 100) * bounds.width) / containerRect.width) * 100;
+  }
+
+  protected getOverlayTopInContainer(overlay: Overlay): number {
+    const bounds = this.getActualVideoBounds();
+    if (!bounds) return overlay.y;
+    
+    const container = this.playerContainer?.nativeElement;
+    if (!container) return overlay.y;
+    
+    const containerRect = container.getBoundingClientRect();
+    // Convert video percentage to container percentage
+    return ((bounds.y + (overlay.y / 100) * bounds.height) / containerRect.height) * 100;
+  }
+
+  protected getOverlayWidthInContainer(overlay: Overlay): number {
+    if (overlay.type === 'text') return 0;
+    
+    const bounds = this.getActualVideoBounds();
+    const width = overlay.type === 'image' ? this.getImageOverlayWidth(overlay) : (overlay.width || 20);
+    if (!bounds) return width;
+    
+    const container = this.playerContainer?.nativeElement;
+    if (!container) return width;
+    
+    const containerRect = container.getBoundingClientRect();
+    // Convert video percentage to container percentage
+    return ((width / 100) * bounds.width / containerRect.width) * 100;
+  }
+
+  protected getOverlayHeightInContainer(overlay: Overlay): number {
+    if (overlay.type === 'text') return 0;
+    
+    const bounds = this.getActualVideoBounds();
+    const height = overlay.type === 'image' ? this.getImageOverlayHeight(overlay) : (overlay.height || 20);
+    if (!bounds) return height;
+    
+    const container = this.playerContainer?.nativeElement;
+    if (!container) return height;
+    
+    const containerRect = container.getBoundingClientRect();
+    // Convert video percentage to container percentage
+    return ((height / 100) * bounds.height / containerRect.height) * 100;
+  }
+
+  /**
+   * Calculate the actual video bounds within the container,
+   * accounting for letterboxing/pillarboxing due to aspect ratio preservation
+   */
+  private getActualVideoBounds(): { x: number; y: number; width: number; height: number } | null {
+    const video = this.videoElement?.nativeElement;
+    const container = this.playerContainer?.nativeElement;
+    if (!video || !container) return null;
+
+    const containerRect = container.getBoundingClientRect();
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    if (!videoWidth || !videoHeight) return null;
+
+    // Calculate the video aspect ratio
+    const videoAspect = videoWidth / videoHeight;
+    const containerAspect = containerRect.width / containerRect.height;
+
+    let actualWidth: number;
+    let actualHeight: number;
+    let offsetX: number;
+    let offsetY: number;
+
+    if (containerAspect > videoAspect) {
+      // Container is wider: video will be letterboxed (black bars on sides)
+      actualHeight = containerRect.height;
+      actualWidth = actualHeight * videoAspect;
+      offsetX = (containerRect.width - actualWidth) / 2;
+      offsetY = 0;
+    } else {
+      // Container is taller: video will be pillarboxed (black bars on top/bottom)
+      actualWidth = containerRect.width;
+      actualHeight = actualWidth / videoAspect;
+      offsetX = 0;
+      offsetY = (containerRect.height - actualHeight) / 2;
+    }
+
+    return {
+      x: offsetX,
+      y: offsetY,
+      width: actualWidth,
+      height: actualHeight
+    };
+  }
+
   protected startDragOverlay(overlay: Overlay, event: PointerEvent): void {
     event.preventDefault();
     event.stopPropagation();
+    const videoBounds = this.getActualVideoBounds();
     const container = this.playerContainer?.nativeElement;
-    if (!container) return;
+    if (!videoBounds || !container) return;
     
-    const rect = container.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 100;
-    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const containerRect = container.getBoundingClientRect();
+    // Calculate position relative to actual video, not container
+    const x = ((event.clientX - containerRect.left - videoBounds.x) / videoBounds.width) * 100;
+    const y = ((event.clientY - containerRect.top - videoBounds.y) / videoBounds.height) * 100;
     
     this.draggingOverlay.set({
       overlay,
@@ -681,12 +897,14 @@ export class VideoEditorComponent implements OnDestroy {
     const drag = this.draggingOverlay();
     if (!drag) return;
     
+    const videoBounds = this.getActualVideoBounds();
     const container = this.playerContainer?.nativeElement;
-    if (!container) return;
+    if (!videoBounds || !container) return;
     
-    const rect = container.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 100;
-    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const containerRect = container.getBoundingClientRect();
+    // Calculate position relative to actual video, not container
+    const x = ((event.clientX - containerRect.left - videoBounds.x) / videoBounds.width) * 100;
+    const y = ((event.clientY - containerRect.top - videoBounds.y) / videoBounds.height) * 100;
     
     const deltaX = x - drag.startX;
     const deltaY = y - drag.startY;
@@ -717,7 +935,7 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected startResizeOverlay(overlay: Overlay, event: PointerEvent, corner: 'se' | 'sw' | 'ne' | 'nw'): void {
-    if (overlay.type !== 'image') return;
+    if (overlay.type !== 'image' && overlay.type !== 'shape') return;
     event.preventDefault();
     event.stopPropagation();
     const container = this.playerContainer?.nativeElement;
@@ -745,12 +963,12 @@ export class VideoEditorComponent implements OnDestroy {
     const resize = this.resizingOverlay();
     if (!resize) return;
     
-    const container = this.playerContainer?.nativeElement;
-    if (!container) return;
+    const videoBounds = this.getActualVideoBounds();
+    if (!videoBounds) return;
     
-    const rect = container.getBoundingClientRect();
-    const deltaX = ((event.clientX - resize.startX) / rect.width) * 100;
-    const deltaY = ((event.clientY - resize.startY) / rect.height) * 100;
+    // Calculate delta based on actual video bounds
+    const deltaX = ((event.clientX - resize.startX) / videoBounds.width) * 100;
+    const deltaY = ((event.clientY - resize.startY) / videoBounds.height) * 100;
     
     let newWidth = resize.startWidth;
     let newHeight = resize.startHeight;
@@ -782,7 +1000,7 @@ export class VideoEditorComponent implements OnDestroy {
     
     // Update overlay
     const updatedOverlays = this.overlays().map(o => 
-      o.id === resize.overlay.id && o.type === 'image'
+      o.id === resize.overlay.id && (o.type === 'image' || o.type === 'shape')
         ? { ...o, width: newWidth, height: newHeight, x: newX, y: newY }
         : o
     );
