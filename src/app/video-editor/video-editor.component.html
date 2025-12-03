@@ -84,7 +84,6 @@
         [class.overlay-preview--text]="overlay.type === 'text'"
         [class.overlay-preview--image]="overlay.type === 'image'"
         [class.overlay-preview--shape]="overlay.type === 'shape'"
-        [class.overlay-preview--shape-circle]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'circle'"
         [class.overlay-preview--shape-rectangle]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'rectangle'"
         [class.overlay-preview--shape-arrow]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'arrow'"
         [class.overlay-preview--dragging]="draggingOverlay()?.overlay?.id === overlay.id"
@@ -364,15 +363,14 @@
         </label>
       </div>
 
-      <div class="field-grid" *ngIf="overlayFormType() === 'shape'">
-        <label>
-          Shape Type
-          <select id="shapeType">
-            <option value="circle">Circle</option>
-            <option value="rectangle">Rectangle</option>
-            <option value="arrow">Arrow</option>
-          </select>
-        </label>
+       <div class="field-grid" *ngIf="overlayFormType() === 'shape'">
+         <label>
+           Shape Type
+           <select id="shapeType">
+             <option value="rectangle">Rectangle</option>
+             <option value="arrow">Arrow</option>
+           </select>
+         </label>
         <label>
           Start (sec)
           <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />

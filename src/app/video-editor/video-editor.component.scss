@@ -283,11 +283,6 @@
     padding: 0;
   }
   
-  // Circle shapes: make the div itself circular
-  &.overlay-preview--shape-circle {
-    border-radius: 50%;
-  }
-  
   // Rectangle shapes: default rectangular (no border-radius)
   &.overlay-preview--shape-rectangle {
     border-radius: 0;

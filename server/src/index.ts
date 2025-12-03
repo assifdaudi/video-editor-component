@@ -825,24 +825,6 @@ function buildOverlayFilters(
             `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
           );
         }
-      } else if (overlay.shapeType === 'circle') {
-        // For circles, use minimum dimension for both width and height to create a square
-        const sizePercent = Math.min(widthPercent, heightPercent);
-        const circleSize = `iw*${sizePercent}/100`;
-        
-        const thickness = fill ? -1 : strokeWidth;
-        
-        if (fill) {
-          // Filled circle: draw directly on video (square approximation)
-          filterParts.push(
-            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${circleSize}:h=${circleSize}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
-          );
-        } else {
-          // Stroked circle: draw border directly on video (square approximation)
-          filterParts.push(
-            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${circleSize}:h=${circleSize}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
-          );
-        }
       } else if (overlay.shapeType === 'arrow') {
         // For arrows, use the full bounding box
         // Arrow shaft: horizontal line (75% of width, centered vertically, thin)
