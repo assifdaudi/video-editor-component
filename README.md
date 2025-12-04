@@ -11,17 +11,158 @@ https://github.com/user-attachments/assets/901d4e4c-032b-4acb-969e-9743783d165b
 
 ## Features
 
+### Video Editing
 - **Unified Timeline**: Click to scrub, drag to move playhead, Shift+drag to create cuts
 - **Visual Editing**: See trim zones, cut segments, and playhead position in real-time
 - **MP4 & MPEG-DASH Support**: Load any MP4 URL or DASH manifest (`.mpd`) via dash.js
-- **Server-Side Rendering**: FFmpeg backend handles all video processing
+- **Multi-Source Concatenation**: Combine multiple videos and images into a single timeline
+- **Non-Destructive Editing**: Original files remain untouched; all edits are rendered to new output
 - **Audio/Video Sync**: Accurate seeking and timestamp regeneration ensures perfect sync
+
+### Multi-Source Timeline
+- **Video + Image Support**: Mix video clips (MP4/MPD) and static images (PNG/JPG/WebP)
+- **Image Duration Control**: Set custom duration for each image source (default: 5 seconds)
+- **Source Reordering**: Drag sources up/down to change playback order
+- **Source Preview**: Navigate between sources with arrow buttons or keyboard (← →)
+- **Timeline Visualization**: Visual separators show where each source begins
+- **Click-to-Jump**: Click timeline boundaries to jump directly to any source
+
+### Overlays
+- **Text Overlays**: Add text with custom font size, color, background, and opacity
+  - Transparent background option for text-only display
+  - Draggable positioning in preview
+  - Resizable from bottom-right corner
+  - Time-based visibility (start/end timestamps)
+  
+- **Image Overlays**: Add logos, graphics, or any image
+  - PNG transparency support (alpha channel respected)
+  - Drag to position, resize from any corner
+  - Pixel-perfect sizing that matches preview to output
+  - Time-based visibility
+  
+- **Shape Overlays**: Add visual elements
+  - Rectangle: Filled or stroked (outline only)
+  - Arrow: Horizontal arrow shapes
+  - Custom colors, stroke width, opacity
+  - Draggable and resizable
+  - Time-based visibility
+
+### User Interface
+- **Modern Dark Theme**: Clean, professional design with minimal aesthetic
+- **Real-Time Preview**: See overlays exactly as they'll appear in the output
+- **Drag & Drop**: Reposition overlays by dragging directly on the video preview
+- **Interactive Timeline**: Visual representation of cuts, trims, and overlay timing
+- **Keyboard Navigation**: Use arrow keys to navigate between sources
+- **Responsive Design**: Adapts to different screen sizes
+
+### Backend Processing
+- **Server-Side Rendering**: FFmpeg backend handles all video processing
+- **Smart Concatenation**: Automatic format normalization when mixing sources
+- **Quality Preservation**: Intelligent encoding settings based on source types
+- **Progress Tracking**: Real-time progress updates during rendering
+- **Temporary File Cleanup**: Automatic cleanup of intermediate files
 
 ## Prerequisites
 
 - Node.js 20+ (CLI warns when using odd releases such as 25.x)
 - npm 10/11 (ships with Node)
 - FFmpeg binary is bundled through `@ffmpeg-installer/ffmpeg`; no system install required.
+
+## Quick Start Guide
+
+### 1. Add Sources
+- Enter a video URL (MP4 or MPD) or image URL (PNG/JPG/WebP) in the source form
+- Click **"Add to Timeline"**
+- For images, specify duration (default: 5 seconds)
+- Add multiple sources to create a concatenated timeline
+- Use up/down arrows to reorder sources
+- **⚠️ Warning**: Mixing MPD and MP4 sources will trigger a quality warning
+
+### 2. Preview Sources
+- Navigate between sources using **← →** arrow buttons or keyboard
+- Images display as static previews
+- Videos play normally with full controls
+- Source indicator shows current position (e.g., "Source 2 / 5")
+
+### 3. Trim & Cut
+- **Set Trim Points**: Use "Mark in from playhead" or input fields
+- **Create Cuts**: 
+  - **Shift+Drag** on timeline to select range
+  - Click "Add Cut" button
+  - Or use timeline playhead and input fields
+- Cuts are displayed visually on the timeline
+- Click any cut to jump to it or remove it
+
+### 4. Add Overlays
+Choose from three overlay types:
+
+**Text Overlays:**
+- Enter text, set timing (start/end)
+- Customize font size, color, background
+- Check "Transparent background" for text-only display
+- Drag to position, resize from bottom-right corner
+
+**Image Overlays:**
+- Enter image URL (PNG with transparency supported!)
+- Set size percentage and timing
+- Drag to position, resize from any corner
+- Perfect for logos, watermarks, graphics
+
+**Shape Overlays:**
+- Choose Rectangle or Arrow
+- Set color, stroke width, fill/stroke style
+- Drag to position, resize as needed
+- Useful for highlighting or visual markers
+
+### 5. Render
+- Click **"Send to backend"** button
+- Watch progress in real-time
+- Preview rendered video directly in browser
+- Download final output when ready
+
+## Keyboard Shortcuts
+
+- **← (Left Arrow)**: Navigate to previous source
+- **→ (Right Arrow)**: Navigate to next source  
+- **Shift + Drag** (on timeline): Create a new cut range
+- **Click** (on timeline): Seek to timestamp
+- **Drag** (on timeline playhead): Scrub through video
+
+## Technical Details
+
+### Frontend Stack
+- **Angular 21**: Modern reactive framework with Signals
+- **TypeScript 5.9**: Type-safe component development
+- **Dash.js 5.1**: MPEG-DASH streaming support
+- **Reactive Forms**: Form validation and input handling
+- **Standalone Components**: Modern Angular architecture
+
+### Backend Stack
+- **Node.js 25**: JavaScript runtime
+- **Express 5.1**: Web server framework
+- **FFmpeg**: Video processing (bundled via `@ffmpeg-installer/ffmpeg`)
+- **Zod**: TypeScript-first schema validation
+- **TypeScript**: Type-safe server code
+
+### Video Processing Pipeline
+1. **Source Download**: Videos/images downloaded to temporary directory
+2. **Image Conversion**: Images converted to video segments with silent audio
+3. **Format Normalization**: Mixed formats transcoded for compatibility
+4. **Concatenation**: Sources stitched into single timeline
+5. **Cutting**: Unwanted segments removed (trim/cuts)
+6. **Overlay Application**: Text/images/shapes composited using FFmpeg filters
+7. **Final Encoding**: Output rendered with quality settings
+8. **Cleanup**: Temporary files automatically removed
+
+### FFmpeg Techniques
+- **`drawtext`**: Text overlay rendering with custom fonts and backgrounds
+- **`overlay`**: Image/shape compositing with alpha blending
+- **`drawbox`**: Shape drawing (rectangles, arrows)
+- **`scale`**: Pixel-perfect image sizing with aspect ratio preservation
+- **`concat`**: Demuxer for seamless multi-source stitching
+- **`loop`**: Image frame duplication for static display
+- **Time-based filters**: `enable='between(t,start,end)'` for timed visibility
+- **Smart encoding**: Stream copy vs transcode based on source requirements
 
 ## Frontend (Angular)
 
@@ -93,15 +234,72 @@ Endpoints:
 
 ```json
 {
-  "sourceUrl": "http://127.0.0.1:3001/videoplayback.mp4",
+  "sources": [
+    { "url": "http://127.0.0.1:3001/video1.mp4", "type": "video" },
+    { "url": "http://127.0.0.1:3001/image.png", "type": "image", "duration": 5 },
+    { "url": "http://127.0.0.1:3001/video2.mp4", "type": "video" }
+  ],
   "trimStart": 3.5,
   "trimEnd": 42.7,
   "cuts": [{ "start": 10.0, "end": 15.2 }],
+  "overlays": [
+    {
+      "id": 1,
+      "type": "text",
+      "text": "Hello World",
+      "start": 5.0,
+      "end": 10.0,
+      "x": 10,
+      "y": 10,
+      "fontSize": 48,
+      "fontColor": "#FFFFFF",
+      "backgroundColor": "transparent",
+      "opacity": 1
+    },
+    {
+      "id": 2,
+      "type": "image",
+      "imageUrl": "https://example.com/logo.png",
+      "start": 0,
+      "end": 30,
+      "x": 80,
+      "y": 5,
+      "width": 192,
+      "height": 108,
+      "opacity": 0.8
+    },
+    {
+      "id": 3,
+      "type": "shape",
+      "shapeType": "rectangle",
+      "start": 15,
+      "end": 25,
+      "x": 50,
+      "y": 50,
+      "width": 384,
+      "height": 216,
+      "color": "#FF0000",
+      "strokeWidth": 3,
+      "fill": false,
+      "opacity": 1
+    }
+  ],
   "format": "mp4"
 }
 ```
 
-The server downloads/streams from `sourceUrl`, cuts each keep segment into temporary files, concatenates them, and emits a new asset under `server/output/`. The HTTP response returns the `jobId`, keep segments, and a `outputFile` path that the Angular UI links to for download.
+**Sources Array**:
+- Each source has a `url`, `type` (video/image), and optional `duration` (for images, in seconds)
+- Sources are concatenated in order
+- Images are converted to video with the specified duration
+
+**Overlays Array**:
+- `x`, `y`: Position as percentage (0-100) relative to video dimensions
+- Text overlays: Font size, colors, optional background
+- Image overlays: `width`, `height` in pixels, supports PNG transparency
+- Shape overlays: Rectangle or arrow with customizable appearance
+
+The server processes all sources, applies cuts and overlays, and outputs a new video file under `server/output/`. The HTTP response returns the `jobId`, keep segments, `outputFile` path, and optional warnings (e.g., when mixing MPD and MP4 formats).
 
 Set `PORT`, `OUTPUT_DIR`, or `CORS_ORIGIN` env vars before starting the server to customize deployment.
 
@@ -198,7 +396,46 @@ When disabled (default):
 - No timeout on transcoding operations
 - Suitable for trusted environments or local development
 
+## Known Limitations
+
+- **Synchronous Rendering**: Large files hold HTTP connection until complete (consider async queue for production)
+- **MPD + MP4 Quality Loss**: Mixing formats requires multiple encoding passes (warning shown)
+- **No Undo/Redo**: Changes are immediate (refresh to reset)
+- **Limited Shape Types**: Only rectangle and arrow shapes (no circle due to FFmpeg limitations)
+- **Text Resize**: Only bottom-right corner resize for text overlays
+- **Client-Side Preview**: Overlay positioning uses browser video player dimensions
+
+## Future Enhancements
+
+- [ ] Async job queue with status polling
+- [ ] More shape types (triangle, line, custom SVG)
+- [ ] Video filters (blur, brightness, contrast)
+- [ ] Audio track management (volume, fade in/out)
+- [ ] Transition effects between sources
+- [ ] Undo/Redo functionality
+- [ ] Template presets for common layouts
+- [ ] Batch processing multiple videos
+- [ ] Direct upload support (not just URLs)
+- [ ] Cloud storage integration (S3, GCS)
+
+## UI Design
+
+The interface features a modern, professional design:
+
+- **Color Scheme**: Pure black backgrounds with red accents (#ef4444)
+- **Typography**: Inter font family for clean readability
+- **Layout**: Card-based design with subtle borders and shadows
+- **Border Radius**: Consistent 6-8px for a minimal, rectangular aesthetic
+- **Buttons**: Flat design with red primary actions
+- **Overlays**: Visual resize handles and hover states for interactivity
+- **Timeline**: Visual representation with color-coded segments
+- **Responsive**: Adapts to different screen sizes with clamp() for spacing
+
 ## Notes
 
 - Rendering happens asynchronously but within the request cycle—large assets will hold the HTTP connection until FFmpeg finishes. For production, move the job orchestration into a queue/worker.
 - The frontend currently assumes the backend is reachable at `http://localhost:4000`; adjust `src/environments/environment.ts` if needed.
+- PNG images with transparency are fully supported for overlays
+- The preview player accounts for letterboxing/pillarboxing when positioning overlays
+- All temporary files are cleaned up automatically after rendering
+- Image overlay sizes are stored in pixels for accurate rendering (converted from percentage input)
