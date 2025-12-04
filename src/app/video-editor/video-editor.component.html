@@ -233,8 +233,7 @@
         [class.overlay-preview--text]="overlay.type === 'text'"
         [class.overlay-preview--image]="overlay.type === 'image'"
         [class.overlay-preview--shape]="overlay.type === 'shape'"
-        [class.overlay-preview--shape-rectangle]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'rectangle'"
-        [class.overlay-preview--shape-arrow]="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'arrow'"
+        [class.overlay-preview--shape-rectangle]="overlay.type === 'shape'"
         [class.overlay-preview--dragging]="draggingOverlay()?.overlay?.id === overlay.id"
         [class.overlay-preview--resizing]="resizingOverlay()?.overlay?.id === overlay.id"
         [style.left.%]="getOverlayLeftInContainer(overlay)"
@@ -255,22 +254,6 @@
           [style.padding]="overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? '5px' : '0'"
         >{{ getOverlayText(overlay) }}</span>
         <img *ngIf="overlay.type === 'image'" [src]="getOverlayImageUrl(overlay)" alt="Overlay" />
-        <!-- Arrow shape uses SVG, others use CSS -->
-        <svg 
-          *ngIf="overlay.type === 'shape' && getShapeOverlayType(overlay) === 'arrow'" 
-          class="overlay-preview__shape-svg" 
-          [attr.viewBox]="'0 0 100 100'"
-          preserveAspectRatio="none"
-        >
-          <path
-            d="M 5 50 L 75 50 M 65 35 L 80 50 L 65 65"
-            [attr.fill]="getShapeOverlayFill(overlay) ? getShapeOverlayColor(overlay) : 'none'"
-            [attr.stroke]="getShapeOverlayColor(overlay)"
-            [attr.stroke-width]="getShapeOverlayStrokeWidth(overlay)"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
         <!-- Resize handles for text, images and shapes -->
         <!-- Resize handles for images and shapes (all 4 corners) -->
         <div
@@ -533,13 +516,7 @@
       </div>
 
        <div class="field-grid" *ngIf="overlayFormType() === 'shape'">
-         <label>
-           Shape Type
-           <select id="shapeType">
-             <option value="rectangle">Rectangle</option>
-             <option value="arrow">Arrow</option>
-           </select>
-         </label>
+         <p class="hint-text">🔲 Rectangle Shape</p>
         <label>
           Start (sec)
           <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />

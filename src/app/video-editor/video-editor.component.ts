@@ -58,13 +58,13 @@ interface ImageOverlay {
 interface ShapeOverlay {
   id: number;
   type: 'shape';
-  shapeType: 'circle' | 'rectangle' | 'arrow';
+  shapeType: 'rectangle';
   start: number;
   end: number;
   x: number; // 0-100 percentage
   y: number; // 0-100 percentage
-  width?: number; // 0-100 percentage
-  height?: number; // 0-100 percentage
+  width?: number; // pixels
+  height?: number; // pixels
   color?: string;
   strokeWidth?: number;
   fill?: boolean;
@@ -173,7 +173,15 @@ export class VideoEditorComponent implements OnDestroy {
     | null = null;
 
   ngOnDestroy(): void {
-    this.dashPlayer?.reset();
+    // Clean up dash.js player
+    if (this.dashPlayer) {
+      try {
+        this.dashPlayer.reset();
+      } catch (error) {
+        console.error('Error cleaning up dash.js player:', error);
+      }
+    }
+    // Clean up keyboard listener
     if (this.keyboardListener) {
       window.removeEventListener('keydown', this.keyboardListener);
     }
@@ -1251,7 +1259,6 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
     const container = this.overlayFormContainer.nativeElement;
-    const shapeTypeSelect = container.querySelector<HTMLSelectElement>('#shapeType');
     const startInput = container.querySelector<HTMLInputElement>('#overlayStart');
     const endInput = container.querySelector<HTMLInputElement>('#overlayEnd');
     const xInput = container.querySelector<HTMLInputElement>('#overlayX');
@@ -1263,33 +1270,32 @@ export class VideoEditorComponent implements OnDestroy {
     const fillInput = container.querySelector<HTMLInputElement>('#shapeFill');
     const opacityInput = container.querySelector<HTMLInputElement>('#shapeOpacity');
 
-    if (!shapeTypeSelect || !startInput || !endInput || !xInput || !yInput || !widthInput || !heightInput || !colorInput || !strokeWidthInput || !fillInput || !opacityInput) {
+    if (!startInput || !endInput || !xInput || !yInput || !widthInput || !heightInput || !colorInput || !strokeWidthInput || !fillInput || !opacityInput) {
       return;
     }
 
-    const shapeType = shapeTypeSelect.value as 'circle' | 'rectangle' | 'arrow';
     const start = Number(startInput.value) || 0;
     const end = Number(endInput.value) || 0;
     const x = Number(xInput.value) || 10;
     const y = Number(yInput.value) || 10;
-    const width = Number(widthInput.value) || 20;
-    const height = Number(heightInput.value) || 20;
+    const widthPercent = Number(widthInput.value) || 20;
+    const heightPercent = Number(heightInput.value) || 20;
     const color = colorInput.value || '#FF0000';
     const strokeWidth = Number(strokeWidthInput.value) || 3;
     const fill = fillInput.checked;
     const opacity = Number(opacityInput.value) || 1;
 
-    this.addShapeOverlay(shapeType, start, end, x, y, width, height, color, strokeWidth, fill, opacity);
+    this.addShapeOverlay('rectangle', start, end, x, y, widthPercent, heightPercent, color, strokeWidth, fill, opacity);
   }
 
   private addShapeOverlay(
-    shapeType: 'circle' | 'rectangle' | 'arrow',
+    shapeType: 'rectangle',
     start: number,
     end: number,
     x: number,
     y: number,
-    width = 20,
-    height = 20,
+    widthPercent = 20,
+    heightPercent = 20,
     color = '#FF0000',
     strokeWidth = 3,
     fill = false,
@@ -1300,6 +1306,17 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
+    // Get actual video dimensions to convert percentage to pixels
+    const video = this.videoElement?.nativeElement;
+    const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
+    const videoHeight = video?.videoHeight || 1080;
+    
+    // Convert percentage to pixels based on actual video dimensions
+    const widthPixels = Math.round((widthPercent / 100) * videoWidth);
+    const heightPixels = Math.round((heightPercent / 100) * videoHeight);
+    
+    console.log(`[addShapeOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
+
     const overlay: ShapeOverlay = {
       id: ++this.overlayCounter,
       type: 'shape',
@@ -1308,8 +1325,8 @@ export class VideoEditorComponent implements OnDestroy {
       end: this.clamp(end, start + 0.1, this.duration()),
       x: this.clamp(x, 0, 100),
       y: this.clamp(y, 0, 100),
-      width: this.clamp(width, 1, 100),
-      height: this.clamp(height, 1, 100),
+      width: widthPixels,
+      height: heightPixels,
       color,
       strokeWidth: this.clamp(strokeWidth, 1, 20),
       fill,
@@ -1333,16 +1350,6 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected hasOverlays = computed(() => this.overlays().length > 0);
 
-  protected getOverlayTitle(overlay: Overlay): string {
-    if (overlay.type === 'text') {
-      return overlay.text;
-    }
-    if (overlay.type === 'shape') {
-      return `${overlay.shapeType.charAt(0).toUpperCase() + overlay.shapeType.slice(1)} shape`;
-    }
-    return 'Image overlay';
-  }
-
   protected getOverlayText(overlay: Overlay): string {
     if (overlay.type === 'text') {
       return overlay.text;
@@ -1355,10 +1362,6 @@ export class VideoEditorComponent implements OnDestroy {
       return overlay.imageUrl;
     }
     return '';
-  }
-
-  protected getShapeOverlayType(overlay: Overlay): 'circle' | 'rectangle' | 'arrow' | null {
-    return overlay.type === 'shape' ? overlay.shapeType : null;
   }
 
   protected getShapeOverlayColor(overlay: Overlay): string {
@@ -1391,6 +1394,17 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected getImageOverlayHeight(overlay: Overlay): number {
     return overlay.type === 'image' ? (overlay.height || 20) : 20;
+  }
+
+  protected getOverlayTitle(overlay: Overlay): string {
+    if (overlay.type === 'text') return `Text: ${overlay.text}`;
+    if (overlay.type === 'image') return 'Image Overlay';
+    if (overlay.type === 'shape') return 'Rectangle Shape';
+    return 'Overlay';
+  }
+
+  protected getShapeOverlayType(overlay: Overlay): 'rectangle' | null {
+    return overlay.type === 'shape' ? overlay.shapeType : null;
   }
 
   protected getActiveOverlays(): Overlay[] {
@@ -1600,11 +1614,11 @@ export class VideoEditorComponent implements OnDestroy {
         corner
       });
     } else {
-      // For images and shapes, track width/height
+      // For images and shapes, track width/height (in pixels)
       this.resizingOverlay.set({
         overlay,
-        startWidth: overlay.width || 20,
-        startHeight: overlay.height || 20,
+        startWidth: overlay.width || 200, // pixels
+        startHeight: overlay.height || 200, // pixels
         startX,
         startY,
         corner
@@ -1668,7 +1682,16 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
     
-    // For images and shapes, adjust width/height
+    // For images and shapes, adjust width/height (in pixels)
+    // Get video dimensions to convert percentage deltas to pixel deltas
+    const video = this.videoElement?.nativeElement;
+    const videoWidth = video?.videoWidth || 1920;
+    const videoHeight = video?.videoHeight || 1080;
+    
+    // Convert percentage delta to pixel delta
+    const deltaXPixels = (deltaX / 100) * videoWidth;
+    const deltaYPixels = (deltaY / 100) * videoHeight;
+    
     let newWidth = resize.startWidth;
     let newHeight = resize.startHeight;
     let newX = resize.overlay.x;
@@ -1677,22 +1700,22 @@ export class VideoEditorComponent implements OnDestroy {
     // Adjust based on corner
     if (resize.corner === 'se') {
       // Southeast: adjust width and height, keep x,y
-      newWidth = this.clamp(resize.startWidth + deltaX, 1, 100);
-      newHeight = this.clamp(resize.startHeight + deltaY, 1, 100);
+      newWidth = this.clamp(resize.startWidth + deltaXPixels, 1, videoWidth);
+      newHeight = this.clamp(resize.startHeight + deltaYPixels, 1, videoHeight);
     } else if (resize.corner === 'sw') {
       // Southwest: adjust width (negative), height, and x
-      newWidth = this.clamp(resize.startWidth - deltaX, 1, 100);
-      newHeight = this.clamp(resize.startHeight + deltaY, 1, 100);
+      newWidth = this.clamp(resize.startWidth - deltaXPixels, 1, videoWidth);
+      newHeight = this.clamp(resize.startHeight + deltaYPixels, 1, videoHeight);
       newX = this.clamp(resize.overlay.x + deltaX, 0, 100);
     } else if (resize.corner === 'ne') {
       // Northeast: adjust width, height (negative), and y
-      newWidth = this.clamp(resize.startWidth + deltaX, 1, 100);
-      newHeight = this.clamp(resize.startHeight - deltaY, 1, 100);
+      newWidth = this.clamp(resize.startWidth + deltaXPixels, 1, videoWidth);
+      newHeight = this.clamp(resize.startHeight - deltaYPixels, 1, videoHeight);
       newY = this.clamp(resize.overlay.y + deltaY, 0, 100);
     } else if (resize.corner === 'nw') {
       // Northwest: adjust width (negative), height (negative), x, and y
-      newWidth = this.clamp(resize.startWidth - deltaX, 1, 100);
-      newHeight = this.clamp(resize.startHeight - deltaY, 1, 100);
+      newWidth = this.clamp(resize.startWidth - deltaXPixels, 1, videoWidth);
+      newHeight = this.clamp(resize.startHeight - deltaYPixels, 1, videoHeight);
       newX = this.clamp(resize.overlay.x + deltaX, 0, 100);
       newY = this.clamp(resize.overlay.y + deltaY, 0, 100);
     }
@@ -1705,17 +1728,22 @@ export class VideoEditorComponent implements OnDestroy {
     );
     this.overlays.set(updatedOverlays);
     
-    // Update form inputs if form is open
+    // Update form inputs if form is open (convert pixels back to percentage for display)
     if (this.overlayFormContainer?.nativeElement && this.showOverlayForm()) {
       const formContainer = this.overlayFormContainer.nativeElement;
-      const xInput = formContainer.querySelector<HTMLInputElement>('#imageX');
-      const yInput = formContainer.querySelector<HTMLInputElement>('#imageY');
-      const widthInput = formContainer.querySelector<HTMLInputElement>('#imageWidth');
-      const heightInput = formContainer.querySelector<HTMLInputElement>('#imageHeight');
-      if (xInput) xInput.value = newX.toString();
-      if (yInput) yInput.value = newY.toString();
-      if (widthInput) widthInput.value = newWidth.toString();
-      if (heightInput) heightInput.value = newHeight.toString();
+      const xInput = formContainer.querySelector<HTMLInputElement>('#imageX, #overlayX');
+      const yInput = formContainer.querySelector<HTMLInputElement>('#imageY, #overlayY');
+      const widthInput = formContainer.querySelector<HTMLInputElement>('#imageWidth, #shapeWidth');
+      const heightInput = formContainer.querySelector<HTMLInputElement>('#imageHeight, #shapeHeight');
+      
+      // Convert pixels back to percentage for form display
+      const widthPercent = Math.round((newWidth / videoWidth) * 100);
+      const heightPercent = Math.round((newHeight / videoHeight) * 100);
+      
+      if (xInput) xInput.value = Math.round(newX).toString();
+      if (yInput) yInput.value = Math.round(newY).toString();
+      if (widthInput) widthInput.value = widthPercent.toString();
+      if (heightInput) heightInput.value = heightPercent.toString();
     }
   }
 

@@ -527,12 +527,6 @@
   }
 }
 
-.overlay-preview__shape-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  pointer-events: none;
-}
 
 .player__image-preview {
   width: 100%;
@@ -612,21 +606,6 @@
   // Rectangle shapes: default rectangular (no border-radius)
   &.overlay-preview--shape-rectangle {
     border-radius: 0;
-  }
-  
-  // Arrow shapes: contain SVG
-  &.overlay-preview--shape-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent !important; // Arrows don't use background
-    border: none !important; // Arrows are drawn with SVG only
-    
-    .overlay-preview__shape-svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
   }
   
   &.overlay-preview--dragging {

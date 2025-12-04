@@ -65,13 +65,13 @@ const imageOverlaySchema = z.object({
 const shapeOverlaySchema = z.object({
   id: z.number(),
   type: z.literal('shape'),
-  shapeType: z.enum(['circle', 'rectangle', 'arrow']),
+  shapeType: z.literal('rectangle'),
   start: z.number().min(0),
   end: z.number().positive(),
-  x: z.number().min(0).max(100),
-  y: z.number().min(0).max(100),
-  width: z.number().min(1).max(100).optional(),
-  height: z.number().min(1).max(100).optional(),
+  x: z.number().min(0).max(100), // percentage
+  y: z.number().min(0).max(100), // percentage
+  width: z.number().min(1).max(10000).optional(), // pixels
+  height: z.number().min(1).max(10000).optional(), // pixels
   color: z.string().optional(),
   strokeWidth: z.number().min(1).max(20).optional(),
   fill: z.boolean().optional(),
@@ -682,14 +682,22 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function hexToRgb(hex: string, opacity: number): string {
-  // Remove # if present
-  hex = hex.replace('#', '');
+  // Remove # if present and validate
+  hex = hex.replace(/^#/, '');
+  
+  // Validate hex format
+  if (!/^[0-9A-Fa-f]{6}$/.test(hex)) {
+    console.warn(`Invalid hex color: ${hex}, using default FF0000`);
+    hex = 'FF0000';
+  }
+  
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
   const b = parseInt(hex.substring(4, 6), 16);
+  
   // FFmpeg format: 0xRRGGBB or 0xRRGGBBAA
   if (opacity < 1) {
-    const a = Math.round(opacity * 255);
+    const a = Math.round(Math.max(0, Math.min(1, opacity)) * 255);
     return `0x${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}${a.toString(16).padStart(2, '0')}`;
   }
   return `0x${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
@@ -1015,20 +1023,33 @@ function runFfmpegWithProgress(
   });
 }
 
-async function downloadFile(url: string, outputPath: string): Promise<void> {
+async function downloadFile(url: string, outputPath: string, timeoutMs: number = 300000): Promise<void> {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(outputPath);
     
+    // Set timeout for download operations (default: 5 minutes)
+    const timeoutId = setTimeout(() => {
+      file.close();
+      fs.unlink(outputPath, () => {});
+      reject(new Error(`Download timeout after ${timeoutMs}ms: ${url}`));
+    }, timeoutMs);
+    
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+    };
+    
     protocol.get(url, response => {
       if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        // Handle redirects
+        // Handle redirects (limit depth implicitly by call stack)
+        cleanup();
         file.close();
         fs.unlink(outputPath, () => {});
-        return downloadFile(response.headers.location, outputPath).then(resolve).catch(reject);
+        return downloadFile(response.headers.location, outputPath, timeoutMs).then(resolve).catch(reject);
       }
       
       if (!response.statusCode || (response.statusCode !== 200 && response.statusCode < 300)) {
+        cleanup();
         file.close();
         fs.unlink(outputPath, () => {});
         reject(new Error(`Failed to download ${url}: ${response.statusCode || 'unknown'}`));
@@ -1037,10 +1058,18 @@ async function downloadFile(url: string, outputPath: string): Promise<void> {
       
       response.pipe(file);
       file.on('finish', () => {
+        cleanup();
         file.close();
         resolve();
       });
+      file.on('error', err => {
+        cleanup();
+        file.close();
+        fs.unlink(outputPath, () => {});
+        reject(err);
+      });
     }).on('error', err => {
+      cleanup();
       file.close();
       fs.unlink(outputPath, () => {});
       reject(err);
@@ -1182,9 +1211,10 @@ function buildOverlayFilters(
       currentStream = `[${outputLabel}]`;
       imageInputIndex++;
     } else if (overlay.type === 'shape') {
-      const widthPercent = overlay.width || 20;
-      const heightPercent = overlay.height || 20;
-      console.log(`[buildOverlayFilters] Shape overlay: type=${overlay.shapeType}, x=${overlay.x}%, y=${overlay.y}%, width=${widthPercent}%, height=${heightPercent}%, fill=${overlay.fill || false}, strokeWidth=${overlay.strokeWidth || 3}`);
+      const widthPixels = overlay.width || 200;
+      const heightPixels = overlay.height || 200;
+      console.log(`[Shape Overlay] id=${overlay.id}, width=${widthPixels}px, height=${heightPixels}px, x=${overlay.x}%, y=${overlay.y}%, fill=${overlay.fill || false}`);
+      
       const color = overlay.color || '#FF0000';
       const strokeWidth = overlay.strokeWidth || 3;
       const fill = overlay.fill || false;
@@ -1194,73 +1224,26 @@ function buildOverlayFilters(
       const rgbColor = hexToRgb(color, opacity);
       
       // Calculate position - drawbox uses 'iw' (input width) and 'ih' (input height)
-      // The bounding box IS the shape (no padding)
+      // Position is percentage, size is pixels
       const drawboxX = `iw*${overlay.x}/100`;
       const drawboxY = `ih*${overlay.y}/100`;
-      const drawboxWidth = `iw*${widthPercent}/100`;
-      const drawboxHeight = `ih*${heightPercent}/100`;
+      const drawboxWidth = String(widthPixels);
+      const drawboxHeight = String(heightPixels);
       
       const enable = `between(t,${overlay.start},${overlay.end})`;
       const outputLabel = `v${filterParts.length + 1}`;
       
-      if (overlay.shapeType === 'rectangle') {
-        // For rectangles, use same approach as circles: color source + overlay for time-based visibility
-        const colorLabel = `colorRect${filterParts.length}`;
-        const scaledLabel = `scaledRect${filterParts.length}`;
-        const boxLabel = `boxRect${filterParts.length}`;
-        const refLabel = `refRect${filterParts.length}`;
-        const chromaLabel = `chromaRect${filterParts.length}`;
-        const thickness = fill ? -1 : strokeWidth;
-        
-        if (fill) {
-          // Filled rectangle: draw directly on video without intermediate canvas
-          filterParts.push(
-            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
-          );
-        } else {
-          // Stroked rectangle: draw border directly on video
-          filterParts.push(
-            `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
-          );
-        }
-      } else if (overlay.shapeType === 'arrow') {
-        // For arrows, use the full bounding box
-        // Arrow shaft: horizontal line (75% of width, centered vertically, thin)
-        // Arrow head: rectangle (20% of width, full height)
-        const shaftWidthPercent = widthPercent * 0.75;
-        const headWidthPercent = widthPercent * 0.20;
-        const shaftHeightPercent = Math.max(heightPercent * 0.15, 0.5); // Thin line, min 0.5%
-        const headHeightPercent = heightPercent;
-        
-        // Shaft position: left side, centered vertically
-        const shaftX = `iw*${overlay.x}/100`;
-        const shaftY = `ih*${overlay.y + heightPercent/2 - shaftHeightPercent/2}/100`;
-        const shaftW = `iw*${shaftWidthPercent}/100`;
-        const shaftH = `ih*${shaftHeightPercent}/100`;
-        
-        // Head position: right side of shaft, full height
-        const headX = `iw*${overlay.x + shaftWidthPercent}/100`;
-        const headY = `ih*${overlay.y}/100`;
-        const headW = `iw*${headWidthPercent}/100`;
-        const headH = `ih*${headHeightPercent}/100`;
-        
-        const shaftLabel = `shaftArrow${filterParts.length}`;
-        const headLabel = `headArrow${filterParts.length}`;
-        
-        console.log(`[buildOverlayFilters] Arrow: shaft=(${shaftX}, ${shaftY}, ${shaftW}, ${shaftH}), head=(${headX}, ${headY}, ${headW}, ${headH})`);
-        
-        if (fill) {
-          // Filled arrow: draw shaft and head directly on video
-          filterParts.push(
-            `${currentStream}drawbox=x=${shaftX}:y=${shaftY}:w=${shaftW}:h=${shaftH}:color=${rgbColor}:t=-1:enable='${enable}'[${shaftLabel}];[${shaftLabel}]drawbox=x=${headX}:y=${headY}:w=${headW}:h=${headH}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
-          );
-        } else {
-          // Stroked arrow: draw shaft and head borders directly on video
-          const thickness = strokeWidth;
-          filterParts.push(
-            `${currentStream}drawbox=x=${shaftX}:y=${shaftY}:w=${shaftW}:h=${shaftH}:color=${rgbColor}:t=${thickness}:enable='${enable}'[${shaftLabel}];[${shaftLabel}]drawbox=x=${headX}:y=${headY}:w=${headW}:h=${headH}:color=${rgbColor}:t=${thickness}:enable='${enable}'[${outputLabel}]`
-          );
-        }
+      // Rectangle shapes only
+      if (fill) {
+        // Filled rectangle: draw directly on video
+        filterParts.push(
+          `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=-1:enable='${enable}'[${outputLabel}]`
+        );
+      } else {
+        // Stroked rectangle: draw border
+        filterParts.push(
+          `${currentStream}drawbox=x=${drawboxX}:y=${drawboxY}:w=${drawboxWidth}:h=${drawboxHeight}:color=${rgbColor}:t=${strokeWidth}:enable='${enable}'[${outputLabel}]`
+        );
       }
       currentStream = `[${outputLabel}]`;
     }

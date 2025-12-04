@@ -40,11 +40,10 @@ https://github.com/user-attachments/assets/901d4e4c-032b-4acb-969e-9743783d165b
   - Pixel-perfect sizing that matches preview to output
   - Time-based visibility
   
-- **Shape Overlays**: Add visual elements
+- **Shape Overlays**: Add rectangular visual elements
   - Rectangle: Filled or stroked (outline only)
-  - Arrow: Horizontal arrow shapes
   - Custom colors, stroke width, opacity
-  - Draggable and resizable
+  - Draggable and resizable with pixel-perfect sizing
   - Time-based visibility
 
 ### User Interface
@@ -109,10 +108,10 @@ Choose from three overlay types:
 - Perfect for logos, watermarks, graphics
 
 **Shape Overlays:**
-- Choose Rectangle or Arrow
+- Rectangle shapes for highlighting or framing
 - Set color, stroke width, fill/stroke style
 - Drag to position, resize as needed
-- Useful for highlighting or visual markers
+- Useful for highlighting, borders, or visual markers
 
 ### 5. Render
 - Click **"Send to backend"** button
@@ -297,7 +296,7 @@ Endpoints:
 - `x`, `y`: Position as percentage (0-100) relative to video dimensions
 - Text overlays: Font size, colors, optional background
 - Image overlays: `width`, `height` in pixels, supports PNG transparency
-- Shape overlays: Rectangle or arrow with customizable appearance
+- Shape overlays: `width`, `height` in pixels, rectangle only with customizable color, stroke, and fill
 
 The server processes all sources, applies cuts and overlays, and outputs a new video file under `server/output/`. The HTTP response returns the `jobId`, keep segments, `outputFile` path, and optional warnings (e.g., when mixing MPD and MP4 formats).
 
@@ -401,22 +400,24 @@ When disabled (default):
 - **Synchronous Rendering**: Large files hold HTTP connection until complete (consider async queue for production)
 - **MPD + MP4 Quality Loss**: Mixing formats requires multiple encoding passes (warning shown)
 - **No Undo/Redo**: Changes are immediate (refresh to reset)
-- **Limited Shape Types**: Only rectangle and arrow shapes (no circle due to FFmpeg limitations)
+- **Limited Shape Types**: Only rectangle shapes supported (circles/arrows not implemented due to FFmpeg limitations)
 - **Text Resize**: Only bottom-right corner resize for text overlays
 - **Client-Side Preview**: Overlay positioning uses browser video player dimensions
 
 ## Future Enhancements
 
 - [ ] Async job queue with status polling
-- [ ] More shape types (triangle, line, custom SVG)
-- [ ] Video filters (blur, brightness, contrast)
-- [ ] Audio track management (volume, fade in/out)
-- [ ] Transition effects between sources
-- [ ] Undo/Redo functionality
+- [ ] More shape types (circle, triangle, line, ellipse, custom SVG paths)
+- [ ] Video filters (blur, brightness, contrast, saturation)
+- [ ] Audio track management (volume, fade in/out, mute)
+- [ ] Transition effects between sources (crossfade, wipe)
+- [ ] Undo/Redo functionality with history stack
 - [ ] Template presets for common layouts
 - [ ] Batch processing multiple videos
 - [ ] Direct upload support (not just URLs)
-- [ ] Cloud storage integration (S3, GCS)
+- [ ] Cloud storage integration (S3, GCS, Azure Blob)
+- [ ] Animated overlays (moving text, panning images)
+- [ ] Video rotation and flip transformations
 
 ## UI Design
 
