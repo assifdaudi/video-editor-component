@@ -50,8 +50,8 @@ interface ImageOverlay {
   end: number;
   x: number; // 0-100 percentage
   y: number; // 0-100 percentage
-  width?: number; // 0-100 percentage
-  height?: number; // 0-100 percentage
+  width?: number; // pixels
+  height?: number; // pixels
   opacity?: number;
 }
 
@@ -1208,14 +1208,25 @@ export class VideoEditorComponent implements OnDestroy {
     end: number,
     x: number,
     y: number,
-    width = 20,
-    height = 20,
+    widthPercent = 20,
+    heightPercent = 20,
     opacity = 1
   ): void {
     if (!imageUrl.trim() || start >= end || end > this.duration()) {
       this.errorMessage.set('Invalid overlay parameters.');
       return;
     }
+
+    // Get actual video dimensions to convert percentage to pixels
+    const video = this.videoElement?.nativeElement;
+    const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
+    const videoHeight = video?.videoHeight || 1080;
+    
+    // Convert percentage to pixels based on actual video dimensions
+    const widthPixels = Math.round((widthPercent / 100) * videoWidth);
+    const heightPixels = Math.round((heightPercent / 100) * videoHeight);
+    
+    console.log(`[addImageOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
     const overlay: ImageOverlay = {
       id: ++this.overlayCounter,
@@ -1225,8 +1236,8 @@ export class VideoEditorComponent implements OnDestroy {
       end: this.clamp(end, start + 0.1, this.duration()),
       x: this.clamp(x, 0, 100),
       y: this.clamp(y, 0, 100),
-      width: this.clamp(width, 1, 100),
-      height: this.clamp(height, 1, 100),
+      width: widthPixels,
+      height: heightPixels,
       opacity: this.clamp(opacity, 0, 1)
     };
 
@@ -1420,30 +1431,42 @@ export class VideoEditorComponent implements OnDestroy {
     if (overlay.type === 'text') return 0;
     
     const bounds = this.getActualVideoBounds();
-    const width = overlay.type === 'image' ? this.getImageOverlayWidth(overlay) : (overlay.width || 20);
-    if (!bounds) return width;
+    if (!bounds) return 0;
     
     const container = this.playerContainer?.nativeElement;
-    if (!container) return width;
+    if (!container) return 0;
     
+    // Get width in pixels from overlay
+    const widthPixels = overlay.type === 'image' ? (overlay.width || 200) : (overlay.width || 200);
+    
+    // Convert pixels to container percentage
+    // widthPixels is relative to video dimensions, we need to scale it to container
     const containerRect = container.getBoundingClientRect();
-    // Convert video percentage to container percentage
-    return ((width / 100) * bounds.width / containerRect.width) * 100;
+    const scaleFactor = bounds.width / (this.videoElement?.nativeElement?.videoWidth || 1920);
+    const widthInContainer = widthPixels * scaleFactor;
+    
+    return (widthInContainer / containerRect.width) * 100;
   }
 
   protected getOverlayHeightInContainer(overlay: Overlay): number {
     if (overlay.type === 'text') return 0;
     
     const bounds = this.getActualVideoBounds();
-    const height = overlay.type === 'image' ? this.getImageOverlayHeight(overlay) : (overlay.height || 20);
-    if (!bounds) return height;
+    if (!bounds) return 0;
     
     const container = this.playerContainer?.nativeElement;
-    if (!container) return height;
+    if (!container) return 0;
     
+    // Get height in pixels from overlay
+    const heightPixels = overlay.type === 'image' ? (overlay.height || 200) : (overlay.height || 200);
+    
+    // Convert pixels to container percentage
+    // heightPixels is relative to video dimensions, we need to scale it to container
     const containerRect = container.getBoundingClientRect();
-    // Convert video percentage to container percentage
-    return ((height / 100) * bounds.height / containerRect.height) * 100;
+    const scaleFactor = bounds.height / (this.videoElement?.nativeElement?.videoHeight || 1080);
+    const heightInContainer = heightPixels * scaleFactor;
+    
+    return (heightInContainer / containerRect.height) * 100;
   }
 
   /**

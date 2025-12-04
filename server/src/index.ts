@@ -55,10 +55,10 @@ const imageOverlaySchema = z.object({
   imageUrl: z.string().url(),
   start: z.number().min(0),
   end: z.number().positive(),
-  x: z.number().min(0).max(100),
-  y: z.number().min(0).max(100),
-  width: z.number().min(1).max(100).optional(),
-  height: z.number().min(1).max(100).optional(),
+  x: z.number().min(0).max(100), // percentage
+  y: z.number().min(0).max(100), // percentage
+  width: z.number().min(1).max(10000).optional(), // pixels
+  height: z.number().min(1).max(10000).optional(), // pixels
   opacity: z.number().min(0).max(1).optional()
 });
 
@@ -1149,9 +1149,12 @@ function buildOverlayFilters(
       }
       currentStream = `[${outputLabel}]`;
     } else if (overlay.type === 'image' && imageInputIndex - 1 < imagePaths.length) {
-      const widthPercent = overlay.width || 20;
-      const heightPercent = overlay.height || 20;
+      const widthPixels = overlay.width || 200;
+      const heightPixels = overlay.height || 200;
       const opacity = overlay.opacity ?? 1;
+      
+      console.log(`[Image Overlay] id=${overlay.id}, width=${widthPixels}px, height=${heightPixels}px, x=${overlay.x}%, y=${overlay.y}%`);
+      
       // Calculate position - percentages to pixels
       const x = `W*${overlay.x}/100`;
       const y = `H*${overlay.y}/100`;
@@ -1164,16 +1167,17 @@ function buildOverlayFilters(
       const scaledImgLabel = `scaled${imageInputIndex}`;
       const outputLabel = `v${filterParts.length + 1}`;
       
-      // Loop the image for the video duration, then scale and overlay it
-      // Use loop filter with a specific duration to avoid infinite loops
-      // Then use scale2ref: [main][ref]scale2ref[scaled_ref][ref_out]
-      // [0:v] is video, [imageInputIndex:v] is the image input
-      // Scale image based on video dimensions using main_w/main_h
-      // Note: scale2ref outputs [scaled_ref][ref_out] where scaled_ref is the scaled reference stream
       // Loop the image for the full video duration to ensure it's available when needed
       const loopSize = Math.ceil(videoDuration * 30); // Estimate frames needed (30 fps)
+      
+      // Extract stream name without brackets for scale2ref
+      const currentStreamName = currentStream.replace(/^\[/, '').replace(/\]$/, '');
+      
+      // Scale image to exact pixel dimensions using scale filter (not scale2ref)
+      // This gives us precise control over the size
+      // Use force_original_aspect_ratio=decrease to maintain aspect ratio and fit within bounds
       filterParts.push(
-        `${imgInput}loop=loop=-1:size=${loopSize}:start=0[${loopedImgLabel}];[0:v][${loopedImgLabel}]scale2ref=w=main_w*${widthPercent}/100:h=main_h*${heightPercent}/100[${scaledImgLabel}][ref${imageInputIndex}];[ref${imageInputIndex}]nullsink;${currentStream}[${scaledImgLabel}]overlay=${x}:${y}:enable='${enable}'[${outputLabel}]`
+        `${imgInput}loop=loop=-1:size=${loopSize}:start=0[${loopedImgLabel}];[${loopedImgLabel}]scale=w=${widthPixels}:h=${heightPixels}:force_original_aspect_ratio=decrease[${scaledImgLabel}];${currentStream}[${scaledImgLabel}]overlay=${x}:${y}:enable='${enable}'[${outputLabel}]`
       );
       currentStream = `[${outputLabel}]`;
       imageInputIndex++;

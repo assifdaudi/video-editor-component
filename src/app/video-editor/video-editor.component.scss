@@ -427,6 +427,113 @@
   }
 }
 
+.overlay-preview {
+  position: absolute;
+  cursor: move;
+  user-select: none;
+  pointer-events: auto;
+  
+  &--text {
+    padding: 0;
+    white-space: nowrap;
+    
+    span {
+      display: inline-block;
+    }
+  }
+  
+  &--image {
+    padding: 0;
+    
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      pointer-events: none;
+    }
+  }
+  
+  &--shape {
+    padding: 0;
+    box-sizing: border-box;
+    
+    &-rectangle {
+      // Rendered via CSS background or border
+    }
+    
+    &-arrow {
+      svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+    }
+  }
+  
+  &:hover {
+    outline: 2px dashed rgba(255, 255, 255, 0.5);
+    outline-offset: 2px;
+  }
+  
+  &--dragging {
+    cursor: grabbing;
+    opacity: 0.8;
+  }
+  
+  &--resizing {
+    cursor: nwse-resize;
+  }
+}
+
+.overlay-preview__resize-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.overlay-preview__resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 2px solid white;
+  border-radius: 50%;
+  pointer-events: auto;
+  z-index: 1001;
+  
+  &--nw {
+    top: -6px;
+    left: -6px;
+    cursor: nw-resize;
+  }
+  
+  &--ne {
+    top: -6px;
+    right: -6px;
+    cursor: ne-resize;
+  }
+  
+  &--sw {
+    bottom: -6px;
+    left: -6px;
+    cursor: sw-resize;
+  }
+  
+  &--se {
+    bottom: -6px;
+    right: -6px;
+    cursor: se-resize;
+  }
+}
+
+.overlay-preview__shape-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
 .player__image-preview {
   width: 100%;
   height: auto;
