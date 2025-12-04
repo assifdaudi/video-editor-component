@@ -17,10 +17,10 @@
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
   gap: clamp(1rem, 2vw, 2.5rem);
   padding: clamp(1.5rem, 2.5vw, 3rem);
-  border-radius: 24px;
+  border-radius: 12px;
   background: var(--panel-gradient);
   border: 1px solid var(--border-muted);
-  box-shadow: 0 35px 80px rgba(2, 6, 23, 0.55);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   color: var(--text-on-panel);
 
   @media (max-width: 900px) {
@@ -48,22 +48,24 @@
 }
 
 .chip {
-  border-radius: 999px;
-  padding: 0.25rem 0.9rem;
-  font-size: 0.8rem;
+  border-radius: 6px;
+  padding: 0.35rem 1rem;
+  font-size: 0.75rem;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .chip--accent {
-  background: rgba(248, 250, 252, 0.15);
-  color: var(--text-on-panel);
-  border: 1px solid rgba(248, 250, 252, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .chip--ghost {
-  background: rgba(15, 23, 42, 0.35);
-  color: var(--text-on-panel);
-  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-quiet);
+  border: 1px solid var(--border-muted);
 }
 
 .stat-grid {
@@ -77,10 +79,9 @@
 
 .stat-grid li {
   padding: 0.75rem 1rem;
-  border-radius: 16px;
-  border: 1px solid rgba(248, 250, 252, 0.15);
-  background: rgba(15, 23, 42, 0.2);
-  backdrop-filter: blur(14px);
+  border-radius: 6px;
+  border: 1px solid var(--border-muted);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .stat-label {
@@ -99,11 +100,10 @@
 }
 
 .status-card {
-  border-radius: 20px;
+  border-radius: 6px;
   padding: 1rem 1.25rem;
-  border: 1px solid rgba(248, 250, 252, 0.15);
-  background: rgba(2, 6, 23, 0.45);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-muted);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .status-label {
@@ -169,10 +169,10 @@
   flex-wrap: wrap;
   align-items: flex-end;
   padding: 1.5rem;
-  border-radius: 20px;
+  border-radius: 8px;
   background: var(--card-glass);
   border: 1px solid var(--border-muted);
-  box-shadow: 0 25px 60px rgba(4, 6, 24, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 
   label {
     flex: 1 1 320px;
@@ -187,12 +187,12 @@
   }
 
   input {
-    padding: 0.95rem 1rem;
-    border-radius: 14px;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
     border: 1px solid var(--border-muted);
-    background: rgba(8, 12, 26, 0.65);
+    background: rgba(255, 255, 255, 0.03);
     color: var(--text-primary);
-    transition: border 0.2s ease, box-shadow 0.2s ease;
+    transition: border 0.2s ease;
 
     &::placeholder {
       color: var(--text-muted);
@@ -201,22 +201,20 @@
     &:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.25);
     }
 
     &.invalid {
       border-color: var(--danger);
-      box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25);
     }
   }
 }
 
 .sources-panel {
   padding: 1.5rem;
-  border-radius: 24px;
+  border-radius: 8px;
   background: var(--card-glass);
   border: 1px solid var(--border-muted);
-  box-shadow: 0 25px 60px rgba(2, 6, 23, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 
   h2 {
     margin: 0 0 0.5rem;
@@ -264,14 +262,14 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.25rem;
-  border-radius: 16px;
+  border-radius: 6px;
   border: 1px solid var(--border-muted);
   background: rgba(255, 255, 255, 0.02);
   transition: all 0.2s;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
   }
 }
 
@@ -391,21 +389,20 @@
 
 .player {
   padding: 1.5rem;
-  border-radius: 28px;
+  border-radius: 8px;
   background: var(--player-gradient);
-  border: 1px solid rgba(248, 250, 252, 0.08);
+  border: 1px solid var(--border-muted);
   display: flex;
-  flex-direction: column;
   flex-direction: column;
   gap: 1rem;
   position: relative;
   min-height: 340px;
-  box-shadow: 0 35px 60px rgba(3, 7, 18, 0.6);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 
   video {
     width: 100%;
     max-height: 440px;
-    border-radius: 20px;
+    border-radius: 6px;
     background: #000;
     transition: opacity 0.2s ease;
   }
@@ -623,14 +620,15 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem;
-  border-radius: 999px;
-  background: rgba(124, 58, 237, 0.9);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.95);
   color: white;
   font-size: 0.85rem;
   font-weight: 600;
+  border: 1px solid var(--border-muted);
   backdrop-filter: blur(10px);
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
   z-index: 10;
 }
@@ -726,10 +724,10 @@
 
 .timeline-shell {
   padding: 1.5rem;
-  border-radius: 24px;
+  border-radius: 8px;
   background: var(--card-glass);
   border: 1px solid var(--border-muted);
-  box-shadow: 0 25px 60px rgba(2, 6, 23, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -913,10 +911,10 @@
 .summary,
 .server-panel {
   padding: 1.5rem;
-  border-radius: 24px;
+  border-radius: 8px;
   background: var(--card-glass);
   border: 1px solid var(--border-muted);
-  box-shadow: 0 25px 60px rgba(2, 6, 23, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 
   h2 {
     margin-top: 0;
