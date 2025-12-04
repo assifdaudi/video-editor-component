@@ -77,6 +77,7 @@ interface RenderResponse {
   jobId: string;
   outputFile: string;
   segments: Array<{ start: number; end: number }>;
+  warning?: string;
 }
 
 @Component({
@@ -204,7 +205,36 @@ export class VideoEditorComponent implements OnDestroy {
     // Determine type based on extension
     const lowerUrl = url.toLowerCase();
     const isImage = lowerUrl.match(/\.(jpg|jpeg|png|gif|webp)$/);
+    const isMpd = lowerUrl.endsWith('.mpd');
     const type: 'video' | 'image' = isImage ? 'image' : 'video';
+
+    // Check if adding this source would mix MPD and MP4 formats
+    if (type === 'video') {
+      const currentSources = this.sources();
+      const hasExistingMpd = currentSources.some(s => s.type === 'video' && s.url.toLowerCase().endsWith('.mpd'));
+      const hasExistingMp4 = currentSources.some(s => s.type === 'video' && !s.url.toLowerCase().endsWith('.mpd'));
+      
+      // Check if we're about to mix formats
+      const wouldMixFormats = (isMpd && hasExistingMp4) || (!isMpd && hasExistingMpd);
+      
+      if (wouldMixFormats && currentSources.length > 0) {
+        // Show confirmation dialog
+        const sourceType = isMpd ? 'MPD' : 'MP4';
+        const existingType = hasExistingMpd ? 'MPD' : 'MP4';
+        
+        const confirmed = confirm(
+          '⚠️ Quality Warning\n\n' +
+          `You are about to add an ${sourceType} source to a timeline that already contains ${existingType} sources.\n\n` +
+          'Mixing MPD and MP4 sources requires multiple encoding passes, which may significantly reduce video quality.\n\n' +
+          'For best quality, use sources of the same format (all MPD or all MP4).\n\n' +
+          'Do you want to continue anyway?'
+        );
+        
+        if (!confirmed) {
+          return; // User cancelled
+        }
+      }
+    }
 
     this.isLoadingSource = true;
     this.loading.set(true);
@@ -216,6 +246,11 @@ export class VideoEditorComponent implements OnDestroy {
       if (type === 'video') {
         // Load video metadata to get duration
         duration = await this.getVideoDuration(url);
+        
+        // Validate duration
+        if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+          throw new Error(`Invalid duration (${duration}) for video: ${url}`);
+        }
       } else {
         // Use custom image duration from form
         duration = this.sourceForm.controls.imageDuration.value || 5;
@@ -255,21 +290,90 @@ export class VideoEditorComponent implements OnDestroy {
       const video = document.createElement('video');
       video.preload = 'metadata';
       
-      video.addEventListener('loadedmetadata', () => {
-        if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
-          resolve(video.duration);
-        } else {
-          reject(new Error('Could not determine video duration'));
-        }
-        video.src = '';
-      });
+      const isMpd = url.toLowerCase().endsWith('.mpd');
       
-      video.addEventListener('error', () => {
-        reject(new Error('Failed to load video metadata'));
-        video.src = '';
-      });
-      
-      video.src = url;
+      if (isMpd) {
+        // Use dash.js for MPD files
+        const player = dashjs.MediaPlayer().create();
+        
+        const timeout = setTimeout(() => {
+          player.reset();
+          reject(new Error('Timeout loading MPD metadata (10s)'));
+        }, 10000); // 10 second timeout
+        
+        // Dash.js fires 'canPlay' when stream is ready
+        const onCanPlay = () => {
+          clearTimeout(timeout);
+          const duration = video.duration;
+          
+          if (duration && !isNaN(duration) && isFinite(duration) && duration > 0) {
+            player.reset();
+            resolve(duration);
+          } else {
+            player.reset();
+            reject(new Error(`Could not determine video duration from MPD (got ${duration})`));
+          }
+        };
+        
+        const onStreamInitialized = () => {
+          // Sometimes duration is available after stream initialization
+          if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+            clearTimeout(timeout);
+            player.reset();
+            resolve(video.duration);
+          }
+        };
+        
+        const onError = (e: any) => {
+          clearTimeout(timeout);
+          player.reset();
+          reject(new Error(`Failed to load MPD metadata: ${e.error || 'Unknown error'}`));
+        };
+        
+        const onManifestLoaded = (e: any) => {
+          // The manifest might contain duration info
+          if (e && e.data && e.data.mediaPresentationDuration) {
+            clearTimeout(timeout);
+            player.reset();
+            resolve(e.data.mediaPresentationDuration);
+          }
+        };
+        
+        // Listen to dash.js events
+        player.on(dashjs.MediaPlayer.events.CAN_PLAY, onCanPlay);
+        player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onStreamInitialized);
+        player.on(dashjs.MediaPlayer.events.ERROR, onError);
+        player.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, onManifestLoaded);
+        
+        // Also listen to video element events as fallback
+        video.addEventListener('loadedmetadata', () => {
+          if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+            clearTimeout(timeout);
+            player.reset();
+            resolve(video.duration);
+          }
+        }, { once: true });
+        
+        // Initialize the player
+        player.initialize(video, url, false);
+      } else {
+        // Regular MP4 or other video format
+        video.addEventListener('loadedmetadata', () => {
+          if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
+            resolve(video.duration);
+          } else {
+            reject(new Error('Could not determine video duration'));
+          }
+          video.src = '';
+        });
+        
+        video.addEventListener('error', () => {
+          reject(new Error('Failed to load video metadata'));
+          video.src = '';
+        });
+        
+        video.src = url;
+      }
     });
   }
 
@@ -408,9 +512,18 @@ export class VideoEditorComponent implements OnDestroy {
     // Calculate total duration
     const totalDuration = allSources.reduce((sum, s) => sum + s.duration, 0);
     
+    // Validate total duration
+    if (isNaN(totalDuration) || !isFinite(totalDuration) || totalDuration <= 0) {
+      this.errorMessage.set(`Invalid total duration (${totalDuration}). One or more sources have invalid durations. Please remove and re-add the sources.`);
+      return;
+    }
+    
     // Reset state (but don't clear sources)
     this.cuts.set([]);
-    this.cutSelection.set({ start: 0, end: 0 });
+    this.cutSelection.set({
+      start: Math.min(totalDuration * 0.25, totalDuration - this.minGap),
+      end: Math.min(totalDuration * 0.4, totalDuration)
+    });
     this.overlays.set([]);
     this.renderResult.set(null);
     this.trimStart.set(0);
@@ -604,6 +717,7 @@ export class VideoEditorComponent implements OnDestroy {
     }
 
     const duration = video.duration ?? 0;
+    const allSources = this.sources();
 
     if (!isFinite(duration) || duration <= 0) {
       this.errorMessage.set(
@@ -612,10 +726,10 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
-    // If we have multiple sources, duration is already set to total
-    // Only update if this is a single source scenario
-    const allSources = this.sources();
-    if (allSources.length === 0 || allSources.length === 1) {
+    // If we have multiple sources, DON'T update duration/trimEnd
+    // The concatenated timeline manages those values
+    if (allSources.length <= 1) {
+      // Single source or no sources - update duration
       this.duration.set(duration);
       this.trimStart.set(0);
       this.trimEnd.set(duration);
@@ -624,6 +738,8 @@ export class VideoEditorComponent implements OnDestroy {
         end: Math.min(duration * 0.4, duration)
       });
     }
+    // For multi-source, duration/trimEnd are already set by loadConcatenatedSources
+    // Don't overwrite them here
   }
 
   protected onTimeUpdate(): void {
@@ -811,19 +927,40 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   private addCutRange(start: number, end: number): TimelineCut | null {
+    // Validate trimEnd is properly set
+    if (this.trimEnd() <= 0) {
+      this.errorMessage.set('Please load a video source first.');
+      return null;
+    }
+    
+    // Clean up any invalid cuts (with NaN values) first
+    const validCuts = this.cuts().filter(cut => 
+      !isNaN(cut.start) && !isNaN(cut.end) && 
+      isFinite(cut.start) && isFinite(cut.end)
+    );
+    if (validCuts.length !== this.cuts().length) {
+      console.warn('Removed invalid cuts with NaN values');
+      this.cuts.set(validCuts);
+    }
+    
     const clampedStart = this.clamp(start, this.trimStart(), this.trimEnd() - this.minGap);
     const clampedEnd = this.clamp(end, clampedStart + this.minGap, this.trimEnd());
+    
     if (clampedEnd - clampedStart < this.minGap) {
       this.errorMessage.set('Cut length must be greater than 100ms.');
       return null;
     }
 
-    const overlapping = this.cuts().some(
+    // Check for overlaps with existing cuts
+    const existingCuts = validCuts;
+    const overlapping = existingCuts.find(
       cut => !(clampedEnd <= cut.start || clampedStart >= cut.end)
     );
 
     if (overlapping) {
-      this.errorMessage.set('Cut overlaps with another segment.');
+      this.errorMessage.set(
+        `Cut overlaps with existing cut at ${overlapping.start.toFixed(2)}s - ${overlapping.end.toFixed(2)}s.`
+      );
       return null;
     }
 
@@ -1596,6 +1733,11 @@ export class VideoEditorComponent implements OnDestroy {
       next: response => {
         this.renderResult.set(response);
         this.renderBusy.set(false);
+        
+        // Display warning if present
+        if (response.warning) {
+          this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
+        }
       },
       error: err => {
         const message =

@@ -21,6 +21,20 @@ const TRANSCODE_PRESET = process.env.FFMPEG_PRESET ?? 'veryfast';
 const TRANSCODE_CRF = process.env.FFMPEG_CRF ?? '20';
 const TRANSCODE_AUDIO_BITRATE = process.env.FFMPEG_AUDIO_BITRATE ?? '192k';
 
+// MPD Transcoding Restrictions (configurable via environment variables)
+const ENABLE_MPD_RESTRICTIONS = process.env.ENABLE_MPD_RESTRICTIONS === 'true'; // Default: false
+const MAX_VIDEO_DURATION_SECONDS = Number(process.env.MAX_VIDEO_DURATION_SECONDS ?? 3600); // Default: 1 hour
+const MAX_VIDEO_WIDTH = Number(process.env.MAX_VIDEO_WIDTH ?? 1920); // Default: 1080p width
+const MAX_VIDEO_HEIGHT = Number(process.env.MAX_VIDEO_HEIGHT ?? 1080); // Default: 1080p height
+const TRANSCODE_TIMEOUT_MS = Number(process.env.TRANSCODE_TIMEOUT_MS ?? 7200000); // Default: 2 hours
+const MAX_TEMP_FILE_SIZE_MB = Number(process.env.MAX_TEMP_FILE_SIZE_MB ?? 5000); // Default: 5GB
+
+// MPD Quality Settings (use higher quality for initial transcode to minimize double-encoding loss)
+// For multi-source: Use near-lossless to preserve quality through re-encode
+const MPD_TRANSCODE_CRF_MULTI = process.env.MPD_TRANSCODE_CRF_MULTI ?? '10'; // Default: 10 (near-lossless for multi-source)
+const MPD_TRANSCODE_CRF_SINGLE = process.env.MPD_TRANSCODE_CRF_SINGLE ?? '18'; // Default: 18 (good quality for single-source)
+const MPD_TRANSCODE_PRESET = process.env.MPD_TRANSCODE_PRESET ?? 'medium'; // Default: medium (balanced speed/quality)
+
 const textOverlaySchema = z.object({
   id: z.number(),
   type: z.literal('text'),
@@ -134,6 +148,21 @@ app.post('/api/render', async (req, res) => {
   
   // Store concatenated source if multiple sources are provided
   let sourceUrl = sources[0]?.url || '';
+  let needsCleanupSingleSource = false;
+  
+  // Track if MPD sources are present to use better quality settings throughout
+  const hasMpdSource = sources.some(s => s.url.toLowerCase().endsWith('.mpd'));
+  const hasMp4Source = sources.some(s => !s.url.toLowerCase().endsWith('.mpd') && s.type === 'video');
+  
+  // Warn about mixing MPD and MP4
+  if (hasMpdSource && hasMp4Source && sources.length > 1) {
+    console.warn(`\n⚠️  ================================================`);
+    console.warn(`⚠️  WARNING: Mixing MPD and MP4 sources detected!`);
+    console.warn(`⚠️  This requires multiple encoding passes which may`);
+    console.warn(`⚠️  reduce video quality, especially for the MPD content.`);
+    console.warn(`⚠️  For best quality, use sources of the same format.`);
+    console.warn(`⚠️  ================================================\n`);
+  }
 
   // Calculate total duration for progress tracking
   const totalDuration = keepSegments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
@@ -162,30 +191,78 @@ app.post('/api/render', async (req, res) => {
       const sourcePaths: string[] = [];
       for (const [index, source] of sources.entries()) {
         const sourcePath = path.join(tempDir, `source-${index}.mp4`);
-        console.log(`[${jobId}] Downloading source ${index + 1}/${sources.length}...`);
+        console.log(`[${jobId}] Processing source ${index + 1}/${sources.length}...`);
         
         if (source.type === 'image') {
           // For images, create a video from the image with custom duration
           // Add silent audio track to match video sources
           const imageDuration = source.duration || 5; // Default to 5 seconds if not specified
-          await downloadFile(source.url, sourcePath.replace('.mp4', '.jpg'));
+          const imagePath = sourcePath.replace('.mp4', '.jpg');
+          await downloadFile(source.url, imagePath);
+          console.log(`[${jobId}] Converting image to video (${imageDuration}s)...`);
           await runFfmpeg([
             '-hide_banner',
             '-y',
             '-loop', '1',
-            '-i', sourcePath.replace('.mp4', '.jpg'),
+            '-i', imagePath,
             '-f', 'lavfi',
             '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
             '-c:v', 'libx264',
             '-t', String(imageDuration),
             '-pix_fmt', 'yuv420p',
-            '-r', '25',
+            '-r', '25', // Match MPD transcode framerate
+            '-vsync', 'cfr',
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', TRANSCODE_AUDIO_BITRATE, // Use same audio bitrate
+            '-ar', '44100', // Match audio sample rate
+            '-ac', '2', // Stereo
             '-shortest',
             sourcePath
           ]);
+        } else if (source.url.toLowerCase().endsWith('.mpd')) {
+          // For MPD (MPEG-DASH) files, validate and transcode to MP4
+          console.log(`[${jobId}] Processing MPD stream: ${source.url}`);
+          
+          // Validate against restrictions (if enabled)
+          await validateMpdRestrictions(source.url);
+          
+          // Use near-lossless CRF for multi-source to preserve quality through re-encode
+          const mpdCrf = MPD_TRANSCODE_CRF_MULTI;
+          console.log(`[${jobId}] Transcoding MPD stream to MP4 (CRF ${mpdCrf} near-lossless for multi-source)...`);
+          await runFfmpegWithTimeout([
+            '-hide_banner',
+            '-y',
+            '-i', source.url,
+            '-c:v', 'libx264',
+            '-preset', MPD_TRANSCODE_PRESET,
+            '-crf', mpdCrf, // Use near-lossless CRF for multi-source
+            '-r', '25', // Normalize framerate
+            '-pix_fmt', 'yuv420p',
+            '-vsync', 'cfr', // Constant frame rate
+            '-c:a', 'aac',
+            '-b:a', TRANSCODE_AUDIO_BITRATE,
+            '-ar', '44100', // Normalize audio sample rate
+            '-ac', '2', // Stereo
+            '-movflags', '+faststart',
+            sourcePath
+          ], ENABLE_MPD_RESTRICTIONS ? TRANSCODE_TIMEOUT_MS : 0);
+          
+          // Check file size (if restrictions enabled)
+          if (ENABLE_MPD_RESTRICTIONS) {
+            const stats = await fsp.stat(sourcePath);
+            const sizeMB = stats.size / (1024 * 1024);
+            if (sizeMB > MAX_TEMP_FILE_SIZE_MB) {
+              await fsp.unlink(sourcePath);
+              throw new Error(
+                `Transcoded MPD file size (${Math.round(sizeMB)}MB) exceeds maximum allowed (${MAX_TEMP_FILE_SIZE_MB}MB)`
+              );
+            }
+            console.log(`[${jobId}] MPD transcoded successfully (${Math.round(sizeMB)}MB)`);
+          } else {
+            console.log(`[${jobId}] MPD transcoded successfully`);
+          }
         } else {
+          // Regular MP4 or other video file
           await downloadFile(source.url, sourcePath);
         }
         
@@ -203,20 +280,102 @@ app.post('/api/render', async (req, res) => {
       }).join('\n');
       await fsp.writeFile(concatListPath, concatLines, 'utf-8');
       
+      // Check if any source is an image (converted to video)
+      const hasImageSource = sources.some(s => s.type === 'image');
+      const needsReencode = hasMpdSource || (hasImageSource && sources.length > 1);
+      
       // Concatenate all sources
       console.log(`[${jobId}] Concatenating sources...`);
-      await runFfmpeg([
-        '-hide_banner',
-        '-y',
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', concatListPath,
-        '-c', 'copy',
-        concatenatedPath
-      ]);
+      
+      if (needsReencode) {
+        // When MPD or mixed sources are present, re-encode to ensure compatibility
+        // This ensures all sources have matching codec parameters (framerate, resolution, etc.)
+        // Use higher quality settings for MPD content to preserve near-lossless intermediate quality
+        const concatPreset = hasMpdSource ? 'medium' : TRANSCODE_PRESET;
+        const concatCrf = hasMpdSource ? '18' : TRANSCODE_CRF; // Use CRF 18 for MPD to preserve quality
+        console.log(`[${jobId}] Mixed source types detected - re-encoding for compatibility (CRF ${concatCrf}, ${concatPreset})...`);
+        await runFfmpeg([
+          '-hide_banner',
+          '-y',
+          '-f', 'concat',
+          '-safe', '0',
+          '-fflags', '+genpts', // Regenerate timestamps
+          '-i', concatListPath,
+          '-c:v', 'libx264',
+          '-preset', concatPreset,
+          '-crf', concatCrf,
+          '-r', '25', // Normalize framerate to 25fps
+          '-pix_fmt', 'yuv420p',
+          '-vsync', 'cfr', // Constant frame rate
+          '-c:a', 'aac',
+          '-b:a', TRANSCODE_AUDIO_BITRATE,
+          '-ar', '44100', // Normalize audio sample rate
+          '-ac', '2', // Stereo audio
+          '-movflags', '+faststart',
+          concatenatedPath
+        ]);
+      } else {
+        // All regular video files with compatible codecs - use stream copy for speed
+        await runFfmpeg([
+          '-hide_banner',
+          '-y',
+          '-f', 'concat',
+          '-safe', '0',
+          '-fflags', '+genpts',
+          '-i', concatListPath,
+          '-c', 'copy',
+          concatenatedPath
+        ]);
+      }
       
       sourceUrl = concatenatedPath;
       console.log(`[${jobId}] Sources concatenated successfully`);
+    } else if (sources.length === 1 && sources[0] && sources[0].url.toLowerCase().endsWith('.mpd')) {
+      // Single MPD source - validate and transcode to MP4 first
+      console.log(`[${jobId}] Processing single MPD source: ${sources[0].url}`);
+      
+      // Validate against restrictions (if enabled)
+      await validateMpdRestrictions(sources[0].url);
+      
+      console.log(`[${jobId}] Transcoding single MPD source to MP4...`);
+      const transcodedPath = path.join(tempDir, 'transcoded.mp4');
+      const mpdCrf = MPD_TRANSCODE_CRF_SINGLE; // Use regular quality for single source (no re-encode)
+      console.log(`[${jobId}] Using CRF ${mpdCrf} for single-source MPD...`);
+      await runFfmpegWithTimeout([
+        '-hide_banner',
+        '-y',
+        '-i', sources[0].url,
+        '-c:v', 'libx264',
+        '-preset', MPD_TRANSCODE_PRESET,
+        '-crf', mpdCrf, // Use single-source CRF
+        '-r', '25', // Normalize framerate
+        '-pix_fmt', 'yuv420p',
+        '-vsync', 'cfr', // Constant frame rate
+        '-c:a', 'aac',
+        '-b:a', TRANSCODE_AUDIO_BITRATE,
+        '-ar', '44100', // Normalize audio sample rate
+        '-ac', '2', // Stereo
+        '-movflags', '+faststart',
+        transcodedPath
+      ], ENABLE_MPD_RESTRICTIONS ? TRANSCODE_TIMEOUT_MS : 0);
+      
+      // Check file size (if restrictions enabled)
+      if (ENABLE_MPD_RESTRICTIONS) {
+        const stats = await fsp.stat(transcodedPath);
+        const sizeMB = stats.size / (1024 * 1024);
+        if (sizeMB > MAX_TEMP_FILE_SIZE_MB) {
+          await fsp.unlink(transcodedPath);
+          throw new Error(
+            `Transcoded MPD file size (${Math.round(sizeMB)}MB) exceeds maximum allowed (${MAX_TEMP_FILE_SIZE_MB}MB)`
+          );
+        }
+        console.log(`[${jobId}] Single MPD source transcoded successfully (${Math.round(sizeMB)}MB)`);
+      } else {
+        console.log(`[${jobId}] Single MPD source transcoded successfully`);
+      }
+      
+      sourceUrl = transcodedPath;
+      needsCleanupSingleSource = true;
     }
 
     for (const [index, segment] of keepSegments.entries()) {
@@ -350,13 +509,19 @@ app.post('/api/render', async (req, res) => {
         }
       }
       
+      // Use better quality settings if MPD sources are present
+      const finalPreset = hasMpdSource ? 'medium' : TRANSCODE_PRESET;
+      const finalCrf = hasMpdSource ? '18' : TRANSCODE_CRF;
+      
+      console.log(`[${jobId}] Final output quality: CRF ${finalCrf}, Preset ${finalPreset}${hasMpdSource ? ' (MPD detected)' : ''}`);
+      
       concatArgs.push(
         '-c:v',
         'libx264',
         '-preset',
-        TRANSCODE_PRESET,
+        finalPreset,
         '-crf',
-        TRANSCODE_CRF,
+        finalCrf,
         '-c:a',
         'aac',
         '-b:a',
@@ -444,12 +609,18 @@ app.post('/api/render', async (req, res) => {
     console.log(`[${jobId}] Sending response...`);
 
     const publicPath = `/output/${path.basename(outputFile)}`;
-    const response = {
+    const response: any = {
       jobId,
       outputFile: publicPath,
       segments: keepSegments,
       transcoded: needsTranscode
     };
+    
+    // Add warning if mixing MPD and MP4
+    if (hasMpdSource && hasMp4Source && sources.length > 1) {
+      response.warning = 'Quality loss may occur when mixing MPD and MP4 sources due to multiple encoding passes. For best quality, use sources of the same format.';
+    }
+    
     console.log(`[${jobId}] Response prepared, sending...`);
     return res.json(response);
   } catch (error) {
@@ -463,6 +634,17 @@ app.post('/api/render', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Video edit server listening on http://localhost:${PORT}`);
   console.log(`Output files will be written to: ${OUTPUT_DIR}`);
+  console.log(`\nMPD Transcoding Settings:`);
+  console.log(`  - Multi-source: CRF ${MPD_TRANSCODE_CRF_MULTI} (near-lossless), Preset: ${MPD_TRANSCODE_PRESET}`);
+  console.log(`  - Single-source: CRF ${MPD_TRANSCODE_CRF_SINGLE}, Preset: ${MPD_TRANSCODE_PRESET}`);
+  console.log(`  - Restrictions: ${ENABLE_MPD_RESTRICTIONS ? 'ENABLED' : 'DISABLED'}`);
+  if (ENABLE_MPD_RESTRICTIONS) {
+    console.log(`    - Max video duration: ${MAX_VIDEO_DURATION_SECONDS}s (${Math.round(MAX_VIDEO_DURATION_SECONDS / 60)} minutes)`);
+    console.log(`    - Max video resolution: ${MAX_VIDEO_WIDTH}x${MAX_VIDEO_HEIGHT}`);
+    console.log(`    - Transcode timeout: ${TRANSCODE_TIMEOUT_MS / 1000}s (${Math.round(TRANSCODE_TIMEOUT_MS / 60000)} minutes)`);
+    console.log(`    - Max temp file size: ${MAX_TEMP_FILE_SIZE_MB}MB`);
+  }
+  console.log(`\nRegular Encoding: CRF ${TRANSCODE_CRF}, Preset: ${TRANSCODE_PRESET}`);
 });
 
 function buildKeepSegments(body: RenderRequest): TimeRange[] {
@@ -524,12 +706,134 @@ async function removeDir(dir: string): Promise<void> {
   await fsp.rm(dir, { recursive: true, force: true });
 }
 
+/**
+ * Probe MPD stream metadata using ffprobe
+ */
+async function probeMpdMetadata(url: string): Promise<{ duration: number; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    // Use ffprobe (bundled with ffmpeg-installer)
+    const ffprobePath = ffmpegInstaller.path.replace('ffmpeg', 'ffprobe');
+    const child = spawn(ffprobePath, [
+      '-v', 'error',
+      '-show_entries', 'format=duration:stream=width,height',
+      '-of', 'json',
+      url
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe failed: ${stderr}`));
+        return;
+      }
+
+      try {
+        const data = JSON.parse(stdout);
+        const duration = parseFloat(data.format?.duration ?? '0') || 0;
+        const videoStream = data.streams?.find((s: any) => s.width && s.height);
+        const width = videoStream?.width || 0;
+        const height = videoStream?.height || 0;
+
+        resolve({ duration, width, height });
+      } catch (err) {
+        reject(new Error(`Failed to parse ffprobe output: ${err}`));
+      }
+    });
+  });
+}
+
+/**
+ * Validate MPD stream against restrictions (if enabled)
+ */
+async function validateMpdRestrictions(url: string): Promise<void> {
+  if (!ENABLE_MPD_RESTRICTIONS) {
+    return; // Restrictions disabled
+  }
+
+  console.log(`[validateMpdRestrictions] Checking restrictions for: ${url}`);
+
+  try {
+    const metadata = await probeMpdMetadata(url);
+    console.log(`[validateMpdRestrictions] Metadata: duration=${metadata.duration}s, resolution=${metadata.width}x${metadata.height}`);
+
+    // Check duration
+    if (metadata.duration > MAX_VIDEO_DURATION_SECONDS) {
+      throw new Error(
+        `MPD stream duration (${Math.round(metadata.duration)}s) exceeds maximum allowed (${MAX_VIDEO_DURATION_SECONDS}s)`
+      );
+    }
+
+    // Check resolution
+    if (metadata.width > MAX_VIDEO_WIDTH || metadata.height > MAX_VIDEO_HEIGHT) {
+      throw new Error(
+        `MPD stream resolution (${metadata.width}x${metadata.height}) exceeds maximum allowed (${MAX_VIDEO_WIDTH}x${MAX_VIDEO_HEIGHT})`
+      );
+    }
+
+    console.log(`[validateMpdRestrictions] Validation passed`);
+  } catch (err) {
+    throw new Error(`MPD validation failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+  }
+}
+
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath = ffmpegInstaller.path;
     const child = spawn(ffmpegPath, args, { stdio: 'inherit' });
     child.on('error', reject);
     child.on('exit', code => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
+    });
+  });
+}
+
+/**
+ * Run FFmpeg with optional timeout (for MPD transcoding)
+ * @param args FFmpeg arguments
+ * @param timeoutMs Timeout in milliseconds (0 = no timeout)
+ */
+function runFfmpegWithTimeout(args: string[], timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ffmpegPath = ffmpegInstaller.path;
+    const child = spawn(ffmpegPath, args, { stdio: 'inherit' });
+    
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let isTimedOut = false;
+    
+    if (timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        isTimedOut = true;
+        child.kill('SIGKILL');
+        reject(new Error(`FFmpeg transcode timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+    }
+    
+    child.on('error', (err) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (!isTimedOut) reject(err);
+    });
+    
+    child.on('exit', (code) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (isTimedOut) return; // Already handled by timeout
+      
       if (code === 0) {
         resolve();
       } else {

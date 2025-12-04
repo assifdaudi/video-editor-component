@@ -105,6 +105,99 @@ The server downloads/streams from `sourceUrl`, cuts each keep segment into tempo
 
 Set `PORT`, `OUTPUT_DIR`, or `CORS_ORIGIN` env vars before starting the server to customize deployment.
 
+### MPD (MPEG-DASH) Transcoding
+
+When processing MPD streams, the backend transcodes them to MP4 format. The quality settings depend on whether the MPD is used alone or with other sources.
+
+**⚠️ Quality Warning:** Mixing MPD and MP4 sources in multi-source mode requires multiple encoding passes, which may reduce video quality. For best results, use sources of the same format (all MPD or all MP4). 
+
+When mixing formats is detected:
+- A confirmation dialog appears **when adding a source** that would mix formats
+- The backend logs a warning during rendering
+- The final response includes a quality warning message
+
+You must explicitly confirm to proceed with mixed formats when adding the source.
+
+**Quality Settings:**
+
+```bash
+# Multi-source MPD: Near-lossless quality (will be re-encoded during concatenation)
+MPD_TRANSCODE_CRF_MULTI=10  # Default: 10 (near-lossless)
+
+# Single-source MPD: Good quality (no re-encoding needed)
+MPD_TRANSCODE_CRF_SINGLE=18 # Default: 18 (good quality)
+
+# MPD transcode preset (applies to both)
+MPD_TRANSCODE_PRESET=medium # Default: medium (balanced speed/quality)
+
+# Regular encoding settings (used for final output and concatenation)
+FFMPEG_CRF=20
+FFMPEG_PRESET=veryfast
+```
+
+**Why Two Quality Levels?**
+
+**Multi-Source (MP4 + MPD):**
+1. **First pass**: MPD → MP4 at **CRF 10** (near-lossless, ~3-5x larger temp file)
+2. **Second pass**: Concatenation at **CRF 18, medium preset**
+3. **Third pass**: Final output (trim/cuts/overlays) at **CRF 18, medium preset**
+
+Result: MPD quality matches MP4 sources throughout the entire pipeline.
+
+**Single-Source (MPD only):**
+1. **Only pass**: MPD → MP4 at **CRF 18** (good quality, reasonable size)
+
+Result: Good quality without the overhead of near-lossless intermediate files.
+
+**File Size Impact:**
+- CRF 10 (near-lossless): ~3-5x larger than CRF 18
+- These are temporary files (cleaned up after rendering)
+- Final output always uses regular `FFMPEG_CRF` (20)
+
+**Optional Restrictions:**
+
+You can enable restrictions to limit resource usage:
+
+```bash
+# Enable or disable restrictions (default: false)
+ENABLE_MPD_RESTRICTIONS=false
+
+# Maximum video duration in seconds (default: 3600 = 1 hour)
+MAX_VIDEO_DURATION_SECONDS=3600
+
+# Maximum video resolution (default: 1920x1080)
+MAX_VIDEO_WIDTH=1920
+MAX_VIDEO_HEIGHT=1080
+
+# Transcode timeout in milliseconds (default: 7200000 = 2 hours)
+TRANSCODE_TIMEOUT_MS=7200000
+
+# Maximum temp file size in MB (default: 5000 = 5GB)
+MAX_TEMP_FILE_SIZE_MB=5000
+```
+
+**Example (enable restrictions):**
+
+```bash
+cd server
+ENABLE_MPD_RESTRICTIONS=true \
+MAX_VIDEO_DURATION_SECONDS=1800 \
+MAX_VIDEO_WIDTH=1280 \
+MAX_VIDEO_HEIGHT=720 \
+npm run dev
+```
+
+When restrictions are enabled:
+- MPD streams are validated before transcoding (duration and resolution)
+- Transcoding operations have a timeout to prevent hanging processes
+- Output file size is checked after transcoding
+- Violations result in an error response with details
+
+When disabled (default):
+- No limits on video duration, resolution, or file size
+- No timeout on transcoding operations
+- Suitable for trusted environments or local development
+
 ## Notes
 
 - Rendering happens asynchronously but within the request cycle—large assets will hold the HTTP connection until FFmpeg finishes. For production, move the job orchestration into a queue/worker.
