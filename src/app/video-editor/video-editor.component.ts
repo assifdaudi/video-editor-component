@@ -24,6 +24,7 @@ import {
   VideoBounds
 } from './video-editor.types';
 import { formatTime, clamp } from './video-editor.utils';
+import { RenderService } from './services/render.service';
 
 @Component({
   selector: 'app-video-editor',
@@ -41,6 +42,7 @@ export class VideoEditorComponent implements OnDestroy {
   // Private fields (dependencies that must be declared first)
   private readonly fb = inject(FormBuilder);
   private readonly http = inject(HttpClient);
+  private readonly renderService = inject(RenderService);
 
   /* eslint-disable @typescript-eslint/member-ordering */
   // Protected fields (must come after fb/http due to dependencies)
@@ -1280,24 +1282,17 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
-    const payload = {
-      sources: allSources.map(s => ({ 
-        url: s.url, 
-        type: s.type,
-        duration: s.type === 'image' ? s.duration : undefined
-      })),
-      trimStart: this.trimStart(),
-      trimEnd: this.trimEnd(),
-      cuts: this.cuts().map(({ start, end }) => ({ start, end })),
-      overlays: this.overlays(),
-      format: 'mp4'
-    };
-
     this.renderBusy.set(true);
     this.renderResult.set(null);
     this.errorMessage.set('');
 
-    this.http.post<RenderResponse>(`${environment.apiBaseUrl}/api/render`, payload).subscribe({
+    this.renderService.render(
+      allSources,
+      this.trimStart(),
+      this.trimEnd(),
+      this.cuts(),
+      this.overlays()
+    ).subscribe({
       next: response => {
         this.renderResult.set(response);
         this.renderBusy.set(false);
@@ -1323,7 +1318,7 @@ export class VideoEditorComponent implements OnDestroy {
     if (!result) {
       return null;
     }
-    return `${environment.apiBaseUrl}${result.outputFile}`;
+    return this.renderService.getDownloadUrl(result.outputFile);
   }
 
   // Private methods
