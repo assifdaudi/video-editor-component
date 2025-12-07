@@ -24,6 +24,7 @@ import {
   VideoBounds
 } from './video-editor.types';
 import { formatTime, clamp } from './video-editor.utils';
+import { validateOverlayTimes } from './utils/timeline.utils';
 import { RenderService } from './services/render.service';
 
 @Component({
@@ -1590,12 +1591,23 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
+    // Clamp times first
+    const clampedStart = this.clamp(start, 0, this.duration());
+    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
+
+    // Validate that overlay doesn't overlap with cuts
+    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
+    if (!validation.isValid) {
+      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
+      return;
+    }
+
     const overlay: TextOverlay = {
       id: ++this.overlayCounter,
       type: 'text',
       text: text.trim(),
-      start: this.clamp(start, 0, this.duration()),
-      end: this.clamp(end, start + 0.1, this.duration()),
+      start: clampedStart,
+      end: clampedEnd,
       x: this.clamp(x, 0, 100),
       y: this.clamp(y, 0, 100),
       fontSize,
@@ -1624,6 +1636,17 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
+    // Clamp times first
+    const clampedStart = this.clamp(start, 0, this.duration());
+    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
+
+    // Validate that overlay doesn't overlap with cuts
+    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
+    if (!validation.isValid) {
+      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
+      return;
+    }
+
     // Get actual video dimensions to convert percentage to pixels
     const video = this.videoElement?.nativeElement;
     const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
@@ -1639,8 +1662,8 @@ export class VideoEditorComponent implements OnDestroy {
       id: ++this.overlayCounter,
       type: 'image',
       imageUrl: imageUrl.trim(),
-      start: this.clamp(start, 0, this.duration()),
-      end: this.clamp(end, start + 0.1, this.duration()),
+      start: clampedStart,
+      end: clampedEnd,
       x: this.clamp(x, 0, 100),
       y: this.clamp(y, 0, 100),
       width: widthPixels,
@@ -1671,6 +1694,17 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
 
+    // Clamp times first
+    const clampedStart = this.clamp(start, 0, this.duration());
+    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
+
+    // Validate that overlay doesn't overlap with cuts
+    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
+    if (!validation.isValid) {
+      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
+      return;
+    }
+
     // Get actual video dimensions to convert percentage to pixels
     const video = this.videoElement?.nativeElement;
     const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
@@ -1686,8 +1720,8 @@ export class VideoEditorComponent implements OnDestroy {
       id: ++this.overlayCounter,
       type: 'shape',
       shapeType,
-      start: this.clamp(start, 0, this.duration()),
-      end: this.clamp(end, start + 0.1, this.duration()),
+      start: clampedStart,
+      end: clampedEnd,
       x: this.clamp(x, 0, 100),
       y: this.clamp(y, 0, 100),
       width: widthPixels,

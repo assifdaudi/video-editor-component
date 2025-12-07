@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import type { VideoSource, TimelineCut, Overlay, RenderResponse } from '../video-editor.types';
+import { calculateAdjustedTime } from '../utils/timeline.utils';
 
 /**
  * Service for handling video rendering API calls
@@ -24,6 +25,24 @@ export class RenderService {
     cuts: TimelineCut[],
     overlays: Overlay[]
   ): Observable<RenderResponse> {
+    // Adjust overlay times to account for cuts being removed
+    const adjustedOverlays = overlays.map(overlay => {
+      const adjustedStart = calculateAdjustedTime(overlay.start, cuts);
+      const adjustedEnd = calculateAdjustedTime(overlay.end, cuts);
+      
+      console.log(`[RenderService] Adjusting overlay times:`, {
+        original: [overlay.start, overlay.end],
+        adjusted: [adjustedStart, adjustedEnd],
+        type: overlay.type
+      });
+      
+      return {
+        ...overlay,
+        start: adjustedStart,
+        end: adjustedEnd
+      };
+    });
+
     const payload = {
       sources: sources.map(s => ({
         url: s.url,
@@ -33,7 +52,7 @@ export class RenderService {
       trimStart,
       trimEnd,
       cuts: cuts.map(c => ({ start: c.start, end: c.end })),
-      overlays,
+      overlays: adjustedOverlays,
       format: 'mp4' as const
     };
 
