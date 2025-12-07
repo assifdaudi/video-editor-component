@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import {
+  ChangeDetectorRef,
   Component,
   ElementRef,
   OnDestroy,
@@ -45,6 +46,7 @@ export class VideoEditorComponent implements OnDestroy {
   // Private fields (dependencies that must be declared first)
   private readonly fb = inject(FormBuilder);
   private readonly http = inject(HttpClient);
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly renderService = inject(RenderService);
   private readonly playerService = inject(VideoPlayerService);
   private readonly overlayService = inject(OverlayService);
@@ -86,8 +88,12 @@ export class VideoEditorComponent implements OnDestroy {
   
   protected readonly trimStart = this.timelineService.getTrimStart();
   protected readonly trimEnd = this.timelineService.getTrimEnd();
-  protected readonly cuts = this.timelineService.getCuts();
-  protected readonly segments = this.timelineService.getSegments();
+  // Use computed signals for display to ensure proper change detection
+  protected readonly cuts = this.timelineService.getCutsForDisplay();
+  protected readonly segments = this.timelineService.getSegmentsForDisplay();
+  // Keep raw signals for operations that need to modify them
+  private readonly cutsRaw = this.timelineService.getCuts();
+  private readonly segmentsRaw = this.timelineService.getSegments();
   protected readonly cutSelection = this.timelineService.getCutSelection();
   protected readonly segmentSelection = this.timelineService.getSegmentSelection();
   protected readonly timelineSelection = this.timelineService.getTimelineSelection();
@@ -444,7 +450,7 @@ export class VideoEditorComponent implements OnDestroy {
     this.currentTime.set(0);
     this.trimStart.set(0);
     this.trimEnd.set(0);
-    this.cuts.set([]);
+    this.cutsRaw.set([]);
     this.cutSelection.set({ start: 0, end: 0 });
     this.overlays.set([]);
     this.overlaySelection.set(null);
@@ -724,11 +730,35 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected removeCut(id: number): void {
+    // Get the cut before deleting to check selection
+    const cut = this.cutsRaw().find(c => c.id === id);
+    const selection = this.cutSelection();
+    
     this.timelineService.deleteCut(id);
+    
+    // Clear selection if the deleted cut was selected
+    if (cut && selection.start === cut.start && selection.end === cut.end) {
+      this.timelineService.setCutSelection(0, 0);
+    }
+    
+    // Force immediate change detection
+    this.cdr.detectChanges();
   }
 
   protected removeSegment(id: number): void {
+    // Get the segment before deleting to check selection
+    const segment = this.segmentsRaw().find(s => s.id === id);
+    const selection = this.segmentSelection();
+    
     this.timelineService.deleteSegment(id);
+    
+    // Clear selection if the deleted segment was selected
+    if (segment && selection.start === segment.start && selection.end === segment.end) {
+      this.timelineService.setSegmentSelection(0, 0);
+    }
+    
+    // Force immediate change detection
+    this.cdr.detectChanges();
   }
 
   protected removeCutFromTimeline(id: number, event?: Event): void {
@@ -1035,6 +1065,20 @@ export class VideoEditorComponent implements OnDestroy {
     if (overlay.type === 'image') return 'Image Overlay';
     if (overlay.type === 'shape') return 'Rectangle Shape';
     return 'Overlay';
+  }
+
+  /**
+   * TrackBy function for cuts - uses id for stable tracking
+   */
+  protected trackCutBy(index: number, cut: TimelineCut): number {
+    return cut.id;
+  }
+
+  /**
+   * TrackBy function for segments - uses id for stable tracking
+   */
+  protected trackSegmentBy(index: number, segment: TimelineSegment): number {
+    return segment.id;
   }
 
   protected getShapeOverlayType(overlay: Overlay): 'rectangle' | null {

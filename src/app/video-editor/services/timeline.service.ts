@@ -29,6 +29,17 @@ export class TimelineService {
   protected readonly hasCuts = computed(() => this.cuts().length > 0);
   protected readonly hasSegments = computed(() => this.segments().length > 0);
   
+  // Computed signals that always return new array references for proper change detection
+  protected readonly cutsForDisplay = computed(() => {
+    const cuts = this.cuts();
+    return cuts.length > 0 ? [...cuts] : [];
+  });
+  
+  protected readonly segmentsForDisplay = computed(() => {
+    const segments = this.segments();
+    return segments.length > 0 ? [...segments] : [];
+  });
+  
   // Get effective cuts for rendering (converts segments if in keep mode)
   protected readonly effectiveCuts = computed(() => {
     if (this.mode() === 'keep') {
@@ -105,7 +116,10 @@ export class TimelineService {
    * Delete a cut
    */
   deleteCut(id: number): void {
-    this.cuts.update(cuts => cuts.filter(c => c.id !== id));
+    const current = this.cuts();
+    // Always create a new array reference to ensure Angular change detection
+    const filtered = current.filter(c => c.id !== id);
+    this.cuts.set([...filtered]);
   }
 
   /**
@@ -166,7 +180,10 @@ export class TimelineService {
    * Delete a segment
    */
   deleteSegment(id: number): void {
-    this.segments.update(segments => segments.filter(s => s.id !== id));
+    const current = this.segments();
+    // Always create a new array reference to ensure Angular change detection
+    const filtered = current.filter(s => s.id !== id);
+    this.segments.set([...filtered]);
   }
 
   /**
@@ -258,6 +275,20 @@ export class TimelineService {
    */
   getSegments(): typeof this.segments {
     return this.segments;
+  }
+
+  /**
+   * Get cuts for display (computed with new array reference)
+   */
+  getCutsForDisplay(): typeof this.cutsForDisplay {
+    return this.cutsForDisplay;
+  }
+
+  /**
+   * Get segments for display (computed with new array reference)
+   */
+  getSegmentsForDisplay(): typeof this.segmentsForDisplay {
+    return this.segmentsForDisplay;
   }
 
   /**

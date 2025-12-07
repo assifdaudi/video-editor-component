@@ -363,9 +363,10 @@
           [style.width.%]="100 - percentFor(trimEnd())"
         ></div>
         @if (timelineMode() === 'cut') {
-          @for (cut of cuts(); track cut.id) {
+          @for (cut of cuts(); track trackCutBy($index, cut)) {
             <div
               class="timeline__cut"
+              [attr.data-cut-id]="cut.id"
               [style.left.%]="percentFor(cut.start)"
               [style.width.%]="percentSpan(cut.start, cut.end)"
               tabindex="0"
@@ -383,9 +384,10 @@
             ></div>
           }
         } @else {
-          @for (segment of segments(); track segment.id) {
+          @for (segment of segments(); track trackSegmentBy($index, segment)) {
             <div
               class="timeline__segment"
+              [attr.data-segment-id]="segment.id"
               [style.left.%]="percentFor(segment.start)"
               [style.width.%]="percentSpan(segment.start, segment.end)"
               tabindex="0"
