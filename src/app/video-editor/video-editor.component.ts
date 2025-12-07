@@ -15,6 +15,7 @@ import { environment } from '../../environments/environment';
 import {
   VideoSource,
   TimelineCut,
+  TimelineSegment,
   Overlay,
   RenderResponse,
   TimelineDrag,
@@ -86,10 +87,14 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly trimStart = this.timelineService.getTrimStart();
   protected readonly trimEnd = this.timelineService.getTrimEnd();
   protected readonly cuts = this.timelineService.getCuts();
+  protected readonly segments = this.timelineService.getSegments();
   protected readonly cutSelection = this.timelineService.getCutSelection();
+  protected readonly segmentSelection = this.timelineService.getSegmentSelection();
   protected readonly timelineSelection = this.timelineService.getTimelineSelection();
   protected readonly trimmedLength = this.timelineService.getTrimmedLength();
   protected readonly hasCuts = this.timelineService.getHasCuts();
+  protected readonly hasSegments = this.timelineService.getHasSegments();
+  protected readonly timelineMode = this.timelineService.getMode();
   
   protected readonly overlays = this.overlayService.getOverlays();
   protected readonly overlaySelection = this.overlayService.getSelectedOverlay();
@@ -360,11 +365,11 @@ export class VideoEditorComponent implements OnDestroy {
     this.timelineService.setTrimStart(0, totalDuration);
     this.timelineService.setTrimEnd(totalDuration, totalDuration);
     
-    // Set cut selection default
-    this.timelineService.setCutSelection(
-      Math.min(totalDuration * 0.25, totalDuration - 0.1),
-      Math.min(totalDuration * 0.4, totalDuration)
-    );
+    // Set cut and segment selection defaults
+    const defaultStart = Math.min(totalDuration * 0.25, totalDuration - 0.1);
+    const defaultEnd = Math.min(totalDuration * 0.4, totalDuration);
+    this.timelineService.setCutSelection(defaultStart, defaultEnd);
+    this.timelineService.setSegmentSelection(defaultStart, defaultEnd);
     
     // Initialize player with video element if not already done
     const video = this.videoElement?.nativeElement;
@@ -615,41 +620,104 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected setCutStartFromCurrent(): void {
+    const currentTime = this.currentTime();
     const start = this.clamp(
-      this.currentTime(),
+      currentTime,
       this.trimStart(),
       this.trimEnd() - this.minGap
     );
-    const nextEnd = Math.max(start + this.minGap, this.cutSelection().end);
-    this.cutSelection.set({
-      start,
-      end: this.clamp(nextEnd, start + this.minGap, this.trimEnd())
-    });
+    
+    if (this.timelineMode() === 'keep') {
+      const nextEnd = Math.max(start + this.minGap, this.segmentSelection().end);
+      this.timelineService.setSegmentSelection(
+        start,
+        this.clamp(nextEnd, start + this.minGap, this.trimEnd())
+      );
+    } else {
+      const nextEnd = Math.max(start + this.minGap, this.cutSelection().end);
+      this.timelineService.setCutSelection(
+        start,
+        this.clamp(nextEnd, start + this.minGap, this.trimEnd())
+      );
+    }
   }
 
   protected setCutEndFromCurrent(): void {
-    const start = this.cutSelection().start;
-    this.cutSelection.set({
-      start,
-      end: this.clamp(this.currentTime(), start + this.minGap, this.trimEnd())
-    });
+    const currentTime = this.currentTime();
+    
+    if (this.timelineMode() === 'keep') {
+      const start = this.segmentSelection().start;
+      this.timelineService.setSegmentSelection(
+        start,
+        this.clamp(currentTime, start + this.minGap, this.trimEnd())
+      );
+    } else {
+      const start = this.cutSelection().start;
+      this.timelineService.setCutSelection(
+        start,
+        this.clamp(currentTime, start + this.minGap, this.trimEnd())
+      );
+    }
   }
 
   protected updateCutSelection(field: 'start' | 'end', event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
-    const next = { ...this.cutSelection() };
-    next[field] = value;
-    if (field === 'start') {
-      next.start = this.clamp(value, this.trimStart(), next.end - this.minGap);
+    
+    if (this.timelineMode() === 'keep') {
+      const current = this.segmentSelection();
+      const next = { ...current };
+      if (field === 'start') {
+        next.start = this.clamp(value, this.trimStart(), next.end - this.minGap);
+      } else {
+        next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
+      }
+      this.timelineService.setSegmentSelection(next.start, next.end);
     } else {
-      next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
+      const current = this.cutSelection();
+      const next = { ...current };
+      if (field === 'start') {
+        next.start = this.clamp(value, this.trimStart(), next.end - this.minGap);
+      } else {
+        next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
+      }
+      this.timelineService.setCutSelection(next.start, next.end);
     }
-    this.cutSelection.set(next);
   }
 
+  /**
+   * Toggle between cut mode and keep mode
+   */
+  protected toggleTimelineMode(): void {
+    const currentMode = this.timelineMode();
+    this.timelineService.setMode(currentMode === 'cut' ? 'keep' : 'cut');
+    this.errorMessage.set('');
+  }
+
+  /**
+   * Add a cut or segment based on current mode
+   */
   protected addCut(): void {
-    const { start, end } = this.cutSelection();
-    const result = this.timelineService.addCut(start, end);
+    if (this.timelineMode() === 'keep') {
+      const { start, end } = this.segmentSelection();
+      const result = this.timelineService.addSegment(start, end);
+      if (!result.success && result.error) {
+        this.errorMessage.set(result.error);
+      }
+    } else {
+      const { start, end } = this.cutSelection();
+      const result = this.timelineService.addCut(start, end);
+      if (!result.success && result.error) {
+        this.errorMessage.set(result.error);
+      }
+    }
+  }
+
+  /**
+   * Add a segment (keep mode)
+   */
+  protected addSegment(): void {
+    const { start, end } = this.segmentSelection();
+    const result = this.timelineService.addSegment(start, end);
     if (!result.success && result.error) {
       this.errorMessage.set(result.error);
     }
@@ -659,14 +727,28 @@ export class VideoEditorComponent implements OnDestroy {
     this.timelineService.deleteCut(id);
   }
 
+  protected removeSegment(id: number): void {
+    this.timelineService.deleteSegment(id);
+  }
+
   protected removeCutFromTimeline(id: number, event?: Event): void {
     event?.stopPropagation();
     this.removeCut(id);
   }
 
+  protected removeSegmentFromTimeline(id: number, event?: Event): void {
+    event?.stopPropagation();
+    this.removeSegment(id);
+  }
+
   protected focusCut(cut: TimelineCut, event?: Event): void {
     event?.stopPropagation();
     this.timelineService.setCutSelection(cut.start, cut.end);
+  }
+
+  protected focusSegment(segment: TimelineSegment, event?: Event): void {
+    event?.stopPropagation();
+    this.timelineService.setSegmentSelection(segment.start, segment.end);
   }
 
   protected formatTime(value: number): string {
@@ -748,9 +830,22 @@ export class VideoEditorComponent implements OnDestroy {
     this.timelineDrag = null;
 
     if (drag.mode === 'selection' && selection) {
-      const result = this.timelineService.addCut(selection.start, selection.end);
-      if (!result.success && result.error) {
-        this.errorMessage.set(result.error);
+      if (this.timelineMode() === 'keep') {
+        const result = this.timelineService.addSegment(selection.start, selection.end);
+        if (!result.success && result.error) {
+          this.errorMessage.set(result.error);
+        } else {
+          // Update segment selection to the added segment
+          this.timelineService.setSegmentSelection(selection.start, selection.end);
+        }
+      } else {
+        const result = this.timelineService.addCut(selection.start, selection.end);
+        if (!result.success && result.error) {
+          this.errorMessage.set(result.error);
+        } else {
+          // Update cut selection to the added cut
+          this.timelineService.setCutSelection(selection.start, selection.end);
+        }
       }
     }
     this.timelineSelection.set(null);
@@ -880,12 +975,12 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected removeOverlay(id: number): void {
-    this.overlays.set(this.overlays().filter(overlay => overlay.id !== id));
+    this.overlayService.deleteOverlay(id);
   }
 
   protected focusOverlay(overlay: Overlay, event?: Event): void {
     event?.stopPropagation();
-    this.overlaySelection.set(overlay);
+    this.overlayService.selectOverlay(overlay);
     this.jumpTo(overlay.start);
   }
 
@@ -1259,11 +1354,14 @@ export class VideoEditorComponent implements OnDestroy {
     this.renderResult.set(null);
     this.errorMessage.set('');
 
+    // Use effective cuts (converts segments to cuts if in keep mode)
+    const effectiveCuts = this.timelineService.getEffectiveCuts()();
+    
     this.renderService.render(
       allSources,
       this.trimStart(),
       this.trimEnd(),
-      this.cuts(),
+      effectiveCuts,
       this.overlays()
     ).subscribe({
       next: response => {
@@ -1453,9 +1551,10 @@ export class VideoEditorComponent implements OnDestroy {
     backgroundColor = 'transparent',
     opacity = 1
   ): void {
+    const mode = this.timelineMode();
     const result = this.overlayService.addText(
       text, start, end, x, y, fontSize, fontColor, backgroundColor, opacity,
-      this.duration(), this.cuts()
+      this.duration(), mode, this.cuts(), this.segments()
     );
     
     if (result.success) {
@@ -1486,9 +1585,10 @@ export class VideoEditorComponent implements OnDestroy {
     
     console.log(`[addImageOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
+    const mode = this.timelineMode();
     const result = this.overlayService.addImage(
       imageUrl, start, end, x, y, widthPixels, heightPixels, opacity,
-      this.duration(), this.cuts()
+      this.duration(), mode, this.cuts(), this.segments()
     );
     
     if (result.success) {
@@ -1522,10 +1622,11 @@ export class VideoEditorComponent implements OnDestroy {
     
     console.log(`[addShapeOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
+    const mode = this.timelineMode();
     const result = this.overlayService.addShape(
       shapeType, start, end, x, y, widthPixels, heightPixels, 
       color, strokeWidth, fill, opacity,
-      this.duration(), this.cuts()
+      this.duration(), mode, this.cuts(), this.segments()
     );
     
     if (result.success) {

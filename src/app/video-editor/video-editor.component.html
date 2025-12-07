@@ -16,8 +16,8 @@
           <strong>±50&nbsp;ms</strong>
         </li>
         <li>
-          <span class="stat-label">Middle cuts</span>
-          <strong>{{ cuts().length || 0 }}</strong>
+          <span class="stat-label">{{ timelineMode() === 'cut' ? 'Middle cuts' : 'Keep segments' }}</span>
+          <strong>{{ timelineMode() === 'cut' ? cuts().length : segments().length || 0 }}</strong>
         </li>
         <li>
           <span class="stat-label">Segment length</span>
@@ -331,7 +331,10 @@
     <section class="timeline-shell">
       <div class="timeline-meta">
         <h2>Unified timeline</h2>
-        <p>Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a cut selection.</p>
+        <p>
+          Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a 
+          {{ timelineMode() === 'cut' ? 'cut' : 'segment' }} selection.
+        </p>
       </div>
       <div
         class="timeline"
@@ -359,24 +362,46 @@
           class="timeline__shade timeline__shade--right"
           [style.width.%]="100 - percentFor(trimEnd())"
         ></div>
-        @for (cut of cuts(); track cut.id) {
-          <div
-            class="timeline__cut"
-            [style.left.%]="percentFor(cut.start)"
-            [style.width.%]="percentSpan(cut.start, cut.end)"
-            tabindex="0"
-            role="button"
-            (click)="focusCut(cut, $event)"
-            (keydown.enter)="focusCut(cut, $event)"
-            (keydown.space)="focusCut(cut, $event); $event.preventDefault()"
-          ></div>
-        }
-        @if (hasCuts()) {
-          <div
-            class="timeline__cut timeline__cut--active"
-            [style.left.%]="percentFor(cutSelection().start)"
-            [style.width.%]="percentSpan(cutSelection().start, cutSelection().end)"
-          ></div>
+        @if (timelineMode() === 'cut') {
+          @for (cut of cuts(); track cut.id) {
+            <div
+              class="timeline__cut"
+              [style.left.%]="percentFor(cut.start)"
+              [style.width.%]="percentSpan(cut.start, cut.end)"
+              tabindex="0"
+              role="button"
+              (click)="focusCut(cut, $event)"
+              (keydown.enter)="focusCut(cut, $event)"
+              (keydown.space)="focusCut(cut, $event); $event.preventDefault()"
+            ></div>
+          }
+          @if (hasCuts()) {
+            <div
+              class="timeline__cut timeline__cut--active"
+              [style.left.%]="percentFor(cutSelection().start)"
+              [style.width.%]="percentSpan(cutSelection().start, cutSelection().end)"
+            ></div>
+          }
+        } @else {
+          @for (segment of segments(); track segment.id) {
+            <div
+              class="timeline__segment"
+              [style.left.%]="percentFor(segment.start)"
+              [style.width.%]="percentSpan(segment.start, segment.end)"
+              tabindex="0"
+              role="button"
+              (click)="focusSegment(segment, $event)"
+              (keydown.enter)="focusSegment(segment, $event)"
+              (keydown.space)="focusSegment(segment, $event); $event.preventDefault()"
+            ></div>
+          }
+          @if (hasSegments()) {
+            <div
+              class="timeline__segment timeline__segment--active"
+              [style.left.%]="percentFor(segmentSelection().start)"
+              [style.width.%]="percentSpan(segmentSelection().start, segmentSelection().end)"
+            ></div>
+          }
         }
         @if (timelineSelection()) {
           <div
@@ -407,9 +432,22 @@
 
   @if (duration() > 0) {
     <section class="cuts-panel">
+      <div class="cuts-panel__header">
+        <h2>{{ timelineMode() === 'cut' ? 'Cut Mode' : 'Keep Mode' }}</h2>
+        <button 
+          type="button" 
+          class="mode-toggle"
+          (click)="toggleTimelineMode()"
+          [title]="timelineMode() === 'cut' ? 'Switch to Keep Mode' : 'Switch to Cut Mode'"
+        >
+          {{ timelineMode() === 'cut' ? '✂️ Cut' : '✅ Keep' }}
+          <span class="mode-toggle__label">{{ timelineMode() === 'cut' ? 'Mark to Remove' : 'Mark to Keep' }}</span>
+        </button>
+      </div>
+      
       <div class="cuts-panel__form">
-        <h2>Manual cut entry</h2>
-        <p>Provide start/end (in seconds) or capture values from the playhead.</p>
+        <h3>{{ timelineMode() === 'cut' ? 'Manual cut entry' : 'Manual segment entry' }}</h3>
+        <p>{{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.' }}</p>
         <div class="field-grid">
           <label>
             Start (sec)
@@ -418,7 +456,7 @@
               step="0.05"
               [min]="0"
               [max]="duration()"
-              [value]="cutSelection().start"
+              [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
               (input)="updateCutSelection('start', $event)"
             />
           </label>
@@ -429,7 +467,7 @@
               step="0.05"
               [min]="0"
               [max]="duration()"
-              [value]="cutSelection().end"
+              [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
               (input)="updateCutSelection('end', $event)"
             />
           </label>
@@ -437,29 +475,52 @@
         <div class="hint">
           <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
           <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
-          <button type="button" class="primary" (click)="addCut()">Add cut</button>
+          <button type="button" class="primary" (click)="addCut()">
+            {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
+          </button>
         </div>
       </div>
 
       <div class="cuts-panel__list">
-        <h2>Cut queue</h2>
-        @if (hasCuts()) {
-          <ul class="cuts">
-            @for (cut of cuts(); track cut.id) {
-              <li>
-                <div class="cuts__times">
-                  <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
-                  <small>{{ formatTime(cut.end - cut.start) }}</small>
-                </div>
-                <div class="cuts__actions">
-                  <button type="button" (click)="jumpTo(cut.start)">Preview</button>
-                  <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
-                </div>
-              </li>
-            }
-          </ul>
+        <h3>{{ timelineMode() === 'cut' ? 'Cut queue' : 'Segment queue' }}</h3>
+        @if (timelineMode() === 'cut') {
+          @if (hasCuts()) {
+            <ul class="cuts">
+              @for (cut of cuts(); track cut.id) {
+                <li>
+                  <div class="cuts__times">
+                    <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
+                    <small>{{ formatTime(cut.end - cut.start) }}</small>
+                  </div>
+                  <div class="cuts__actions">
+                    <button type="button" (click)="jumpTo(cut.start)">Preview</button>
+                    <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
+                  </div>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">No cuts added yet.</p>
+          }
         } @else {
-          <p class="muted">No cuts added yet.</p>
+          @if (hasSegments()) {
+            <ul class="cuts">
+              @for (segment of segments(); track segment.id) {
+                <li>
+                  <div class="cuts__times">
+                    <span>{{ formatTime(segment.start) }} – {{ formatTime(segment.end) }}</span>
+                    <small>{{ formatTime(segment.end - segment.start) }}</small>
+                  </div>
+                  <div class="cuts__actions">
+                    <button type="button" (click)="jumpTo(segment.start)">Preview</button>
+                    <button type="button" class="ghost" (click)="removeSegment(segment.id)">Remove</button>
+                  </div>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">No segments added yet. Mark parts to keep in the final video.</p>
+          }
         }
       </div>
     </section>

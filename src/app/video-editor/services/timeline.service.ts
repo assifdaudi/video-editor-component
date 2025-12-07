@@ -1,18 +1,24 @@
 import { Injectable, signal, computed } from '@angular/core';
-import type { TimelineCut } from '../video-editor.types';
+import type { TimelineCut, TimelineSegment } from '../video-editor.types';
+import { segmentsToCuts } from '../utils/timeline.utils';
 
 /**
- * Service for managing timeline state (cuts, trim points)
+ * Service for managing timeline state (cuts, trim points, segments)
  */
 @Injectable({
   providedIn: 'root'
 })
 export class TimelineService {
+  // Mode: 'cut' = remove marked parts, 'keep' = keep only marked parts
+  protected readonly mode = signal<'cut' | 'keep'>('cut');
+  
   // State
   protected readonly trimStart = signal(0);
   protected readonly trimEnd = signal(0);
   protected readonly cuts = signal<TimelineCut[]>([]);
+  protected readonly segments = signal<TimelineSegment[]>([]);
   protected readonly cutSelection = signal({ start: 0, end: 0 });
+  protected readonly segmentSelection = signal({ start: 0, end: 0 });
   protected readonly timelineSelection = signal<{ start: number; end: number } | null>(null);
 
   // Computed
@@ -21,8 +27,18 @@ export class TimelineService {
   );
   
   protected readonly hasCuts = computed(() => this.cuts().length > 0);
+  protected readonly hasSegments = computed(() => this.segments().length > 0);
+  
+  // Get effective cuts for rendering (converts segments if in keep mode)
+  protected readonly effectiveCuts = computed(() => {
+    if (this.mode() === 'keep') {
+      return segmentsToCuts(this.segments(), this.trimStart(), this.trimEnd());
+    }
+    return this.cuts();
+  });
 
   private cutCounter = 0;
+  private segmentCounter = 0;
   private readonly minGap = 0.1;
 
   /**
@@ -100,6 +116,74 @@ export class TimelineService {
   }
 
   /**
+   * Set the editing mode (cut or keep)
+   */
+  setMode(mode: 'cut' | 'keep'): void {
+    this.mode.set(mode);
+    // Clear selections when switching modes
+    if (mode === 'cut') {
+      this.segments.set([]);
+    } else {
+      this.cuts.set([]);
+    }
+  }
+
+  /**
+   * Add a segment to keep
+   */
+  addSegment(start: number, end: number): { success: boolean; error?: string } {
+    const trimStart = this.trimStart();
+    const trimEnd = this.trimEnd();
+
+    if (start >= end) {
+      return { success: false, error: 'Segment start must be before end.' };
+    }
+
+    if (start < trimStart || end > trimEnd) {
+      return { success: false, error: 'Segment must be within trim range.' };
+    }
+
+    // Check for overlaps with existing segments
+    const overlaps = this.segments().some(
+      s => (start >= s.start && start < s.end) || (end > s.start && end <= s.end) || (start <= s.start && end >= s.end)
+    );
+
+    if (overlaps) {
+      return { success: false, error: 'Segment overlaps with existing segment.' };
+    }
+
+    const newSegment: TimelineSegment = {
+      id: ++this.segmentCounter,
+      start,
+      end
+    };
+
+    this.segments.set([...this.segments(), newSegment].sort((a, b) => a.start - b.start));
+    return { success: true };
+  }
+
+  /**
+   * Delete a segment
+   */
+  deleteSegment(id: number): void {
+    this.segments.update(segments => segments.filter(s => s.id !== id));
+  }
+
+  /**
+   * Clear all segments
+   */
+  clearAllSegments(): void {
+    this.segments.set([]);
+  }
+
+  /**
+   * Set segment selection (for adding new segments)
+   */
+  setSegmentSelection(start: number, end: number): void {
+    this.segmentSelection.set({ start, end });
+  }
+
+  /**
    * Set cut selection (for adding new cuts)
    */
   setCutSelection(start: number, end: number): void {
@@ -163,14 +247,52 @@ export class TimelineService {
   }
 
   /**
+   * Get mode signal
+   */
+  getMode(): typeof this.mode {
+    return this.mode;
+  }
+
+  /**
+   * Get segments signal
+   */
+  getSegments(): typeof this.segments {
+    return this.segments;
+  }
+
+  /**
+   * Get segment selection signal
+   */
+  getSegmentSelection(): typeof this.segmentSelection {
+    return this.segmentSelection;
+  }
+
+  /**
+   * Get hasSegments computed
+   */
+  getHasSegments(): typeof this.hasSegments {
+    return this.hasSegments;
+  }
+
+  /**
+   * Get effective cuts for rendering (converts segments if in keep mode)
+   */
+  getEffectiveCuts(): typeof this.effectiveCuts {
+    return this.effectiveCuts;
+  }
+
+  /**
    * Reset timeline
    */
   reset(): void {
     this.trimStart.set(0);
     this.trimEnd.set(0);
     this.cuts.set([]);
+    this.segments.set([]);
     this.cutSelection.set({ start: 0, end: 0 });
+    this.segmentSelection.set({ start: 0, end: 0 });
     this.timelineSelection.set(null);
+    this.mode.set('cut');
   }
 }
 

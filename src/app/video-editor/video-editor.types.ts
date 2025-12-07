@@ -26,6 +26,15 @@ export interface TimelineCut {
 }
 
 /**
+ * Represents a segment to keep in the timeline (inverse of cut)
+ */
+export interface TimelineSegment {
+  id: number;
+  start: number; // Start time in seconds
+  end: number; // End time in seconds
+}
+
+/**
  * Base interface for all overlay types
  */
 export interface BaseOverlay {

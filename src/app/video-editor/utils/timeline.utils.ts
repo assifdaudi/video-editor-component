@@ -1,4 +1,4 @@
-import type { TimelineCut } from '../video-editor.types';
+import type { TimelineCut, TimelineSegment } from '../video-editor.types';
 
 /**
  * Timeline calculation utilities for handling cuts
@@ -162,6 +162,144 @@ export function validateOverlayTimes(
   }
   
   console.log(`[validateOverlayTimes] ✅ VALID - Overlay does not overlap with cuts`);
+  return { isValid: true };
+}
+
+/**
+ * Convert segments (keep mode) to cuts (remove mode)
+ * @param segments Array of segments to keep
+ * @param trimStart Start of trim range
+ * @param trimEnd End of trim range
+ * @returns Array of cuts representing everything NOT in segments
+ */
+export function segmentsToCuts(
+  segments: TimelineSegment[],
+  trimStart: number,
+  trimEnd: number
+): TimelineCut[] {
+  if (segments.length === 0) {
+    // If no segments, cut everything
+    return [{ id: 0, start: trimStart, end: trimEnd }];
+  }
+
+  const sortedSegments = [...segments].sort((a, b) => a.start - b.start);
+  const cuts: TimelineCut[] = [];
+  let currentPos = trimStart;
+
+  for (const segment of sortedSegments) {
+    // Add a cut before this segment if there's a gap
+    if (currentPos < segment.start) {
+      cuts.push({
+        id: cuts.length,
+        start: currentPos,
+        end: segment.start
+      });
+    }
+    currentPos = segment.end;
+  }
+
+  // Add a cut after the last segment if there's a gap
+  if (currentPos < trimEnd) {
+    cuts.push({
+      id: cuts.length,
+      start: currentPos,
+      end: trimEnd
+    });
+  }
+
+  return cuts;
+}
+
+/**
+ * Convert cuts (remove mode) to segments (keep mode)
+ * @param cuts Array of cuts to remove
+ * @param trimStart Start of trim range
+ * @param trimEnd End of trim range
+ * @returns Array of segments representing everything NOT in cuts
+ */
+export function cutsToSegments(
+  cuts: TimelineCut[],
+  trimStart: number,
+  trimEnd: number
+): TimelineSegment[] {
+  if (cuts.length === 0) {
+    // If no cuts, keep everything
+    return [{ id: 0, start: trimStart, end: trimEnd }];
+  }
+
+  const sortedCuts = [...cuts].sort((a, b) => a.start - b.start);
+  const segments: TimelineSegment[] = [];
+  let currentPos = trimStart;
+
+  for (const cut of sortedCuts) {
+    // Add a segment before this cut if there's a gap
+    if (currentPos < cut.start) {
+      segments.push({
+        id: segments.length,
+        start: currentPos,
+        end: cut.start
+      });
+    }
+    currentPos = cut.end;
+  }
+
+  // Add a segment after the last cut if there's a gap
+  if (currentPos < trimEnd) {
+    segments.push({
+      id: segments.length,
+      start: currentPos,
+      end: trimEnd
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Check if a time is within any segment (keep mode)
+ * @param time The time to check
+ * @param segments Array of segments to keep
+ * @returns true if the time falls within any segment
+ */
+export function isTimeInSegment(time: number, segments: TimelineSegment[]): boolean {
+  return segments.some(segment => time >= segment.start && time < segment.end);
+}
+
+/**
+ * Check if a time range is completely within segments (keep mode)
+ * @param start Start time of the range
+ * @param end End time of the range
+ * @param segments Array of segments to keep
+ * @returns true if the entire range is within segments
+ */
+export function isRangeInSegments(start: number, end: number, segments: TimelineSegment[]): boolean {
+  // Check if the entire range is within at least one segment
+  return segments.some(segment => start >= segment.start && end <= segment.end);
+}
+
+/**
+ * Validate that an overlay time range is within segments (keep mode)
+ * @param start Overlay start time
+ * @param end Overlay end time
+ * @param segments Array of segments to keep
+ * @returns Object with isValid boolean and error message if invalid
+ */
+export function validateOverlayTimesForSegments(
+  start: number,
+  end: number,
+  segments: TimelineSegment[]
+): { isValid: boolean; error?: string } {
+  console.log(`[validateOverlayTimesForSegments] Checking overlay [${start}s - ${end}s] against ${segments.length} segments`);
+  
+  if (!isRangeInSegments(start, end, segments)) {
+    console.log(`[validateOverlayTimesForSegments] ❌ BLOCKED - Overlay not within kept segments`);
+    return {
+      isValid: false,
+      error: 'Overlay must be placed within a segment that will be kept in the final video.'
+    };
+  }
+  
+  console.log(`[validateOverlayTimesForSegments] ✅ VALID - Overlay is within kept segments`);
   return { isValid: true };
 }
 

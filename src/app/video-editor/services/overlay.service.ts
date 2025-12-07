@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
-import type { Overlay, TextOverlay, ImageOverlay, ShapeOverlay, TimelineCut } from '../video-editor.types';
-import { validateOverlayTimes } from '../utils/timeline.utils';
+import type { Overlay, TextOverlay, ImageOverlay, ShapeOverlay, TimelineCut, TimelineSegment } from '../video-editor.types';
+import { validateOverlayTimes, validateOverlayTimesForSegments } from '../utils/timeline.utils';
 import { clamp } from '../video-editor.utils';
 
 /**
@@ -30,7 +30,9 @@ export class OverlayService {
     backgroundColor: string,
     opacity: number,
     duration: number,
-    cuts: TimelineCut[]
+    mode: 'cut' | 'keep',
+    cuts: TimelineCut[],
+    segments: TimelineSegment[]
   ): { success: boolean; error?: string } {
     if (!text.trim() || start >= end || end > duration) {
       return { success: false, error: 'Invalid overlay parameters.' };
@@ -39,7 +41,11 @@ export class OverlayService {
     const clampedStart = clamp(start, 0, duration);
     const clampedEnd = clamp(end, start + 0.1, duration);
 
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, cuts);
+    // Validate based on mode
+    const validation = mode === 'keep' 
+      ? validateOverlayTimesForSegments(clampedStart, clampedEnd, segments)
+      : validateOverlayTimes(clampedStart, clampedEnd, cuts);
+      
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
@@ -75,7 +81,9 @@ export class OverlayService {
     heightPixels: number,
     opacity: number,
     duration: number,
-    cuts: TimelineCut[]
+    mode: 'cut' | 'keep',
+    cuts: TimelineCut[],
+    segments: TimelineSegment[]
   ): { success: boolean; error?: string } {
     if (!imageUrl.trim() || start >= end || end > duration) {
       return { success: false, error: 'Invalid overlay parameters.' };
@@ -84,7 +92,11 @@ export class OverlayService {
     const clampedStart = clamp(start, 0, duration);
     const clampedEnd = clamp(end, start + 0.1, duration);
 
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, cuts);
+    // Validate based on mode
+    const validation = mode === 'keep' 
+      ? validateOverlayTimesForSegments(clampedStart, clampedEnd, segments)
+      : validateOverlayTimes(clampedStart, clampedEnd, cuts);
+      
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
@@ -122,7 +134,9 @@ export class OverlayService {
     fill: boolean,
     opacity: number,
     duration: number,
-    cuts: TimelineCut[]
+    mode: 'cut' | 'keep',
+    cuts: TimelineCut[],
+    segments: TimelineSegment[]
   ): { success: boolean; error?: string } {
     if (start >= end || end > duration) {
       return { success: false, error: 'Invalid overlay parameters.' };
@@ -131,7 +145,11 @@ export class OverlayService {
     const clampedStart = clamp(start, 0, duration);
     const clampedEnd = clamp(end, start + 0.1, duration);
 
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, cuts);
+    // Validate based on mode
+    const validation = mode === 'keep' 
+      ? validateOverlayTimesForSegments(clampedStart, clampedEnd, segments)
+      : validateOverlayTimes(clampedStart, clampedEnd, cuts);
+      
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
