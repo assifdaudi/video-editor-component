@@ -16,16 +16,17 @@ import {
   VideoSource,
   TimelineCut,
   Overlay,
-  TextOverlay,
-  ImageOverlay,
-  ShapeOverlay,
   RenderResponse,
   TimelineDrag,
   VideoBounds
 } from './video-editor.types';
 import { formatTime, clamp } from './video-editor.utils';
-import { validateOverlayTimes } from './utils/timeline.utils';
-import { RenderService } from './services/render.service';
+import { 
+  RenderService, 
+  VideoPlayerService, 
+  OverlayService, 
+  TimelineService 
+} from './services';
 
 @Component({
   selector: 'app-video-editor',
@@ -44,6 +45,9 @@ export class VideoEditorComponent implements OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly http = inject(HttpClient);
   private readonly renderService = inject(RenderService);
+  private readonly playerService = inject(VideoPlayerService);
+  private readonly overlayService = inject(OverlayService);
+  private readonly timelineService = inject(TimelineService);
 
   /* eslint-disable @typescript-eslint/member-ordering */
   // Protected fields (must come after fb/http due to dependencies)
@@ -60,34 +64,36 @@ export class VideoEditorComponent implements OnDestroy {
     return !!url.match(/\.(jpg|jpeg|png|gif|webp)$/);
   });
 
+  // UI-specific state (stays in component)
   protected readonly loading = signal(false);
   protected readonly errorMessage = signal('');
-  protected readonly sources = signal<VideoSource[]>([]);
   protected readonly sourceBoundaries = signal<number[]>([]); // Cumulative timestamps where sources end
-  protected readonly duration = signal(0);
-  protected readonly currentTime = signal(0);
-  protected readonly trimStart = signal(0);
-  protected readonly trimEnd = signal(0);
-  protected readonly sourceLoaded = signal(false);
-  protected readonly currentSourceIndex = signal(0); // Index of currently playing source
   protected readonly editingSourceId = signal<number | null>(null); // ID of source being edited
-  protected readonly cuts = signal<TimelineCut[]>([]);
-  protected readonly cutSelection = signal({ start: 0, end: 0 });
-  protected readonly overlays = signal<Overlay[]>([]);
-  protected readonly overlaySelection = signal<Overlay | null>(null);
   protected readonly showOverlayForm = signal(false);
   protected readonly overlayFormType = signal<'text' | 'image' | 'shape'>('text');
   protected readonly renderBusy = signal(false);
   protected readonly renderResult = signal<RenderResponse | null>(null);
-  protected readonly timelineSelection = signal<{ start: number; end: number } | null>(null);
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   protected readonly resizingOverlay = signal<{ overlay: Overlay; startWidth: number; startHeight: number; startX: number; startY: number; corner: 'se' | 'sw' | 'ne' | 'nw' } | null>(null);
 
-  protected readonly trimmedLength = computed(
-    () => Math.max(this.trimEnd() - this.trimStart(), 0)
-  );
+  // Service signals (delegated)
+  protected readonly sources = this.playerService.getSources();
+  protected readonly duration = this.playerService.getDuration();
+  protected readonly currentTime = this.playerService.getCurrentTime();
+  protected readonly sourceLoaded = this.playerService.getSourceLoaded();
+  protected readonly currentSourceIndex = this.playerService.getCurrentSourceIndex();
+  
+  protected readonly trimStart = this.timelineService.getTrimStart();
+  protected readonly trimEnd = this.timelineService.getTrimEnd();
+  protected readonly cuts = this.timelineService.getCuts();
+  protected readonly cutSelection = this.timelineService.getCutSelection();
+  protected readonly timelineSelection = this.timelineService.getTimelineSelection();
+  protected readonly trimmedLength = this.timelineService.getTrimmedLength();
+  protected readonly hasCuts = this.timelineService.getHasCuts();
+  
+  protected readonly overlays = this.overlayService.getOverlays();
+  protected readonly overlaySelection = this.overlayService.getSelectedOverlay();
 
-  protected readonly hasCuts = computed(() => this.cuts().length > 0);
   protected readonly canRender = computed(
     () => this.sourceLoaded() && this.duration() > 0 && !this.loading()
   );
@@ -96,13 +102,8 @@ export class VideoEditorComponent implements OnDestroy {
   /* eslint-enable @typescript-eslint/member-ordering */
 
   // Private fields (remaining)
-  
-  private dashPlayer?: dashjs.MediaPlayerClass;
-  private cutCounter = 0;
-  private overlayCounter = 0;
   private readonly minGap = 0.1;
   private timelineDrag: TimelineDrag = null;
-  
   private nextSourceId = 1;
   private isLoadingSource = false;
   private keyboardListener?: (event: KeyboardEvent) => void;
@@ -130,14 +131,9 @@ export class VideoEditorComponent implements OnDestroy {
 
   // Lifecycle hooks
   ngOnDestroy(): void {
-    // Clean up dash.js player
-    if (this.dashPlayer) {
-      try {
-        this.dashPlayer.reset();
-      } catch (error) {
-        console.error('Error cleaning up dash.js player:', error);
-      }
-    }
+    // Clean up video player service
+    this.playerService.cleanup();
+    
     // Clean up keyboard listener
     if (this.keyboardListener) {
       window.removeEventListener('keydown', this.keyboardListener);
@@ -355,91 +351,72 @@ export class VideoEditorComponent implements OnDestroy {
       return;
     }
     
-    // Reset state (but don't clear sources)
-    this.cuts.set([]);
-    this.cutSelection.set({
-      start: Math.min(totalDuration * 0.25, totalDuration - this.minGap),
-      end: Math.min(totalDuration * 0.4, totalDuration)
-    });
-    this.overlays.set([]);
+    // Reset services
+    this.timelineService.reset();
+    this.overlayService.clearAll();
     this.renderResult.set(null);
-    this.trimStart.set(0);
-    this.trimEnd.set(totalDuration);
-    this.duration.set(totalDuration);
-    this.currentSourceIndex.set(0);
     
-    // Load the first source
-    this.loadSourceAtIndex(0);
-    this.sourceLoaded.set(true);
+    // Set trim range to full duration
+    this.timelineService.setTrimStart(0, totalDuration);
+    this.timelineService.setTrimEnd(totalDuration, totalDuration);
+    
+    // Set cut selection default
+    this.timelineService.setCutSelection(
+      Math.min(totalDuration * 0.25, totalDuration - 0.1),
+      Math.min(totalDuration * 0.4, totalDuration)
+    );
+    
+    // Initialize player with video element if not already done
+    const video = this.videoElement?.nativeElement;
+    if (video) {
+      this.playerService.initialize(video);
+    }
+    
+    // Load sources into player
+    this.playerService.loadSources(allSources);
+    this.playerService.setDuration(totalDuration);
   }
 
   /**
    * Navigate to previous source
    */
   protected goToPreviousSource(): void {
-    const currentIndex = this.currentSourceIndex();
-    if (currentIndex > 0) {
-      this.loadSourceAtIndex(currentIndex - 1);
-      const video = this.videoElement?.nativeElement;
-      if (video) {
-        video.currentTime = 0;
-      }
-    }
+    this.playerService.goToPrevious();
   }
 
   /**
    * Navigate to next source
    */
   protected goToNextSource(): void {
-    const currentIndex = this.currentSourceIndex();
-    const allSources = this.sources();
-    if (currentIndex < allSources.length - 1) {
-      this.loadSourceAtIndex(currentIndex + 1);
-      const video = this.videoElement?.nativeElement;
-      if (video) {
-        video.currentTime = 0;
-      }
-    }
+    this.playerService.goToNext();
   }
 
   /**
    * Jump to a specific source by its start time (for clicking timeline boundaries)
    */
   protected jumpToSourceByTime(time: number): void {
-    const allSources = this.sources();
-    for (let i = 0; i < allSources.length; i++) {
-      const source = allSources[i];
-      if (time >= source.startTime && time < source.startTime + source.duration) {
-        this.loadSourceAtIndex(i);
-        const video = this.videoElement?.nativeElement;
-        if (video) {
-          video.currentTime = time - source.startTime;
-        }
-        break;
-      }
-    }
+    this.playerService.jumpToSourceByTime(time);
   }
 
   /**
    * Check if user can navigate to previous source
    */
   protected canGoToPreviousSource(): boolean {
-    return this.currentSourceIndex() > 0;
+    return this.playerService.canGoToPrevious();
   }
 
   /**
    * Check if user can navigate to next source
    */
   protected canGoToNextSource(): boolean {
-    return this.currentSourceIndex() < this.sources().length - 1;
+    return this.playerService.canGoToNext();
   }
 
   /**
    * Get the current source being previewed
    */
   protected getCurrentSource(): VideoSource | undefined {
-    const allSources = this.sources();
-    return allSources[this.currentSourceIndex()];
+    return this.playerService.getCurrentSource();
   }
 
   /**
@@ -477,8 +454,7 @@ export class VideoEditorComponent implements OnDestroy {
       video.load();
     }
 
-    this.dashPlayer?.reset();
-    this.dashPlayer = undefined;
+    // Player cleanup handled by service
   }
 
   protected onMetadataLoaded(): void {
@@ -566,24 +542,20 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected updateTrimStart(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
-    const clamped = Math.min(value, this.trimEnd() - this.minGap);
-    this.trimStart.set(this.clamp(clamped, 0, this.duration()));
+    this.timelineService.setTrimStart(value, this.duration());
   }
 
   protected updateTrimEnd(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
-    const clamped = Math.max(value, this.trimStart() + this.minGap);
-    this.trimEnd.set(this.clamp(clamped, 0, this.duration()));
+    this.timelineService.setTrimEnd(value, this.duration());
   }
 
   protected setTrimStartFromCurrent(): void {
-    this.trimStart.set(this.clamp(this.currentTime(), 0, this.trimEnd() - this.minGap));
+    this.timelineService.setTrimStart(this.currentTime(), this.duration());
   }
 
   protected setTrimEndFromCurrent(): void {
-    this.trimEnd.set(
-      this.clamp(this.currentTime(), this.trimStart() + this.minGap, this.duration())
-    );
+    this.timelineService.setTrimEnd(this.currentTime(), this.duration());
   }
 
   protected togglePlayPause(): void {
@@ -628,7 +600,7 @@ export class VideoEditorComponent implements OnDestroy {
 
       // Load the target source if not already loaded
       if (this.currentSourceIndex() !== targetSourceIndex) {
-        this.loadSourceAtIndex(targetSourceIndex);
+        this.playerService.loadSourceAtIndex(targetSourceIndex);
         // Wait for video to load, then seek
         setTimeout(() => {
           video.currentTime = localTime;
@@ -677,14 +649,14 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected addCut(): void {
     const { start, end } = this.cutSelection();
-    const newCut = this.addCutRange(start, end);
-    if (newCut) {
-      this.cutSelection.set({ start: newCut.start, end: newCut.end });
+    const result = this.timelineService.addCut(start, end);
+    if (!result.success && result.error) {
+      this.errorMessage.set(result.error);
     }
   }
 
   protected removeCut(id: number): void {
-    this.cuts.set(this.cuts().filter(cut => cut.id !== id));
+    this.timelineService.deleteCut(id);
   }
 
   protected removeCutFromTimeline(id: number, event?: Event): void {
@@ -694,7 +666,7 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected focusCut(cut: TimelineCut, event?: Event): void {
     event?.stopPropagation();
-    this.cutSelection.set({ start: cut.start, end: cut.end });
+    this.timelineService.setCutSelection(cut.start, cut.end);
   }
 
   protected formatTime(value: number): string {
@@ -776,9 +748,9 @@ export class VideoEditorComponent implements OnDestroy {
     this.timelineDrag = null;
 
     if (drag.mode === 'selection' && selection) {
-      const newCut = this.addCutRange(selection.start, selection.end);
-      if (newCut) {
-        this.cutSelection.set({ start: newCut.start, end: newCut.end });
+      const result = this.timelineService.addCut(selection.start, selection.end);
+      if (!result.success && result.error) {
+        this.errorMessage.set(result.error);
       }
     }
     this.timelineSelection.set(null);
@@ -1455,118 +1427,13 @@ export class VideoEditorComponent implements OnDestroy {
   /**
    * Load a specific source by index
    */
-  private loadSourceAtIndex(index: number): void {
-    const allSources = this.sources();
-    if (index < 0 || index >= allSources.length) {
-      return;
-    }
-
-    const source = allSources[index];
-    const video = this.videoElement?.nativeElement;
-    
-    if (!video) {
-      return;
-    }
-
-    // Clean up previous player
-    if (this.dashPlayer) {
-      this.dashPlayer.reset();
-      this.dashPlayer = undefined;
-    }
-
-    // For images, hide video and show image
-    if (source.type === 'image') {
-      console.log(`[Preview] Loading image source: ${source.url}`);
-      video.style.display = 'none';
-      video.pause();
-      video.src = '';
-      this.currentSourceIndex.set(index);
-      return;
-    }
-
-    // For videos, show video element and load
-    video.style.display = 'block';
-    const url = source.url;
-    const isMpd = url.toLowerCase().endsWith('.mpd');
-
-    if (isMpd) {
-      this.dashPlayer = dashjs.MediaPlayer().create();
-      this.dashPlayer.initialize(video, url, true);
-    } else {
-      video.src = url;
-      video.load();
-    }
-
-    this.currentSourceIndex.set(index);
-  }
-
   /**
    * Advance to the next source when current one ends
    */
   private advanceToNextSource(): void {
-    const nextIndex = this.currentSourceIndex() + 1;
-    const allSources = this.sources();
-    
-    if (nextIndex < allSources.length) {
-      this.loadSourceAtIndex(nextIndex);
-      
-      // If video is playing, continue playing the next source
-      const video = this.videoElement?.nativeElement;
-      if (video && !video.paused) {
-        setTimeout(() => video.play(), 100);
-      }
-    }
+    this.playerService.advanceToNext();
   }
 
-  private addCutRange(start: number, end: number): TimelineCut | null {
-    // Validate trimEnd is properly set
-    if (this.trimEnd() <= 0) {
-      this.errorMessage.set('Please load a video source first.');
-      return null;
-    }
-    
-    // Clean up any invalid cuts (with NaN values) first
-    const validCuts = this.cuts().filter(cut => 
-      !isNaN(cut.start) && !isNaN(cut.end) && 
-      isFinite(cut.start) && isFinite(cut.end)
-    );
-    if (validCuts.length !== this.cuts().length) {
-      console.warn('Removed invalid cuts with NaN values');
-      this.cuts.set(validCuts);
-    }
-    
-    const clampedStart = this.clamp(start, this.trimStart(), this.trimEnd() - this.minGap);
-    const clampedEnd = this.clamp(end, clampedStart + this.minGap, this.trimEnd());
-    
-    if (clampedEnd - clampedStart < this.minGap) {
-      this.errorMessage.set('Cut length must be greater than 100ms.');
-      return null;
-    }
-
-    // Check for overlaps with existing cuts
-    const existingCuts = validCuts;
-    const overlapping = existingCuts.find(
-      cut => !(clampedEnd <= cut.start || clampedStart >= cut.end)
-    );
-
-    if (overlapping) {
-      this.errorMessage.set(
-        `Cut overlaps with existing cut at ${overlapping.start.toFixed(2)}s - ${overlapping.end.toFixed(2)}s.`
-      );
-      return null;
-    }
-
-    const newCut: TimelineCut = {
-      id: ++this.cutCounter,
-      start: clampedStart,
-      end: clampedEnd
-    };
-
-    const sortedCuts = [...this.cuts(), newCut].sort((a, b) => a.start - b.start);
-    this.cuts.set(sortedCuts);
-    this.errorMessage.set('');
-    return newCut;
-  }
 
   private timelineTimeFromEvent(event: PointerEvent, element: HTMLElement): number {
     const rect = element.getBoundingClientRect();
@@ -1586,39 +1453,17 @@ export class VideoEditorComponent implements OnDestroy {
     backgroundColor = 'transparent',
     opacity = 1
   ): void {
-    if (!text.trim() || start >= end || end > this.duration()) {
-      this.errorMessage.set('Invalid overlay parameters.');
-      return;
+    const result = this.overlayService.addText(
+      text, start, end, x, y, fontSize, fontColor, backgroundColor, opacity,
+      this.duration(), this.cuts()
+    );
+    
+    if (result.success) {
+      this.closeOverlayForm();
+      this.errorMessage.set('');
+    } else {
+      this.errorMessage.set(result.error || 'Failed to add overlay.');
     }
-
-    // Clamp times first
-    const clampedStart = this.clamp(start, 0, this.duration());
-    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
-
-    // Validate that overlay doesn't overlap with cuts
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
-    if (!validation.isValid) {
-      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
-      return;
-    }
-
-    const overlay: TextOverlay = {
-      id: ++this.overlayCounter,
-      type: 'text',
-      text: text.trim(),
-      start: clampedStart,
-      end: clampedEnd,
-      x: this.clamp(x, 0, 100),
-      y: this.clamp(y, 0, 100),
-      fontSize,
-      fontColor,
-      backgroundColor,
-      opacity: this.clamp(opacity, 0, 1)
-    };
-
-    this.overlays.set([...this.overlays(), overlay].sort((a, b) => a.start - b.start));
-    this.closeOverlayForm();
-    this.errorMessage.set('');
   }
 
   private addImageOverlay(
@@ -1631,49 +1476,27 @@ export class VideoEditorComponent implements OnDestroy {
     heightPercent = 20,
     opacity = 1
   ): void {
-    if (!imageUrl.trim() || start >= end || end > this.duration()) {
-      this.errorMessage.set('Invalid overlay parameters.');
-      return;
-    }
-
-    // Clamp times first
-    const clampedStart = this.clamp(start, 0, this.duration());
-    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
-
-    // Validate that overlay doesn't overlap with cuts
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
-    if (!validation.isValid) {
-      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
-      return;
-    }
-
     // Get actual video dimensions to convert percentage to pixels
     const video = this.videoElement?.nativeElement;
-    const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
+    const videoWidth = video?.videoWidth || 1920;
     const videoHeight = video?.videoHeight || 1080;
     
-    // Convert percentage to pixels based on actual video dimensions
     const widthPixels = Math.round((widthPercent / 100) * videoWidth);
     const heightPixels = Math.round((heightPercent / 100) * videoHeight);
     
     console.log(`[addImageOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
-    const overlay: ImageOverlay = {
-      id: ++this.overlayCounter,
-      type: 'image',
-      imageUrl: imageUrl.trim(),
-      start: clampedStart,
-      end: clampedEnd,
-      x: this.clamp(x, 0, 100),
-      y: this.clamp(y, 0, 100),
-      width: widthPixels,
-      height: heightPixels,
-      opacity: this.clamp(opacity, 0, 1)
-    };
-
-    this.overlays.set([...this.overlays(), overlay].sort((a, b) => a.start - b.start));
-    this.closeOverlayForm();
-    this.errorMessage.set('');
+    const result = this.overlayService.addImage(
+      imageUrl, start, end, x, y, widthPixels, heightPixels, opacity,
+      this.duration(), this.cuts()
+    );
+    
+    if (result.success) {
+      this.closeOverlayForm();
+      this.errorMessage.set('');
+    } else {
+      this.errorMessage.set(result.error || 'Failed to add overlay.');
+    }
   }
 
   private addShapeOverlay(
@@ -1689,52 +1512,28 @@ export class VideoEditorComponent implements OnDestroy {
     fill = false,
     opacity = 1
   ): void {
-    if (start >= end || end > this.duration()) {
-      this.errorMessage.set('Invalid overlay parameters.');
-      return;
-    }
-
-    // Clamp times first
-    const clampedStart = this.clamp(start, 0, this.duration());
-    const clampedEnd = this.clamp(end, start + 0.1, this.duration());
-
-    // Validate that overlay doesn't overlap with cuts
-    const validation = validateOverlayTimes(clampedStart, clampedEnd, this.cuts());
-    if (!validation.isValid) {
-      this.errorMessage.set(validation.error || 'Overlay overlaps with a cut region.');
-      return;
-    }
-
     // Get actual video dimensions to convert percentage to pixels
     const video = this.videoElement?.nativeElement;
-    const videoWidth = video?.videoWidth || 1920; // Fallback to common resolution
+    const videoWidth = video?.videoWidth || 1920;
     const videoHeight = video?.videoHeight || 1080;
     
-    // Convert percentage to pixels based on actual video dimensions
     const widthPixels = Math.round((widthPercent / 100) * videoWidth);
     const heightPixels = Math.round((heightPercent / 100) * videoHeight);
     
     console.log(`[addShapeOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
-    const overlay: ShapeOverlay = {
-      id: ++this.overlayCounter,
-      type: 'shape',
-      shapeType,
-      start: clampedStart,
-      end: clampedEnd,
-      x: this.clamp(x, 0, 100),
-      y: this.clamp(y, 0, 100),
-      width: widthPixels,
-      height: heightPixels,
-      color,
-      strokeWidth: this.clamp(strokeWidth, 1, 20),
-      fill,
-      opacity: this.clamp(opacity, 0, 1)
-    };
-
-    this.overlays.set([...this.overlays(), overlay].sort((a, b) => a.start - b.start));
-    this.closeOverlayForm();
-    this.errorMessage.set('');
+    const result = this.overlayService.addShape(
+      shapeType, start, end, x, y, widthPixels, heightPixels, 
+      color, strokeWidth, fill, opacity,
+      this.duration(), this.cuts()
+    );
+    
+    if (result.success) {
+      this.closeOverlayForm();
+      this.errorMessage.set('');
+    } else {
+      this.errorMessage.set(result.error || 'Failed to add overlay.');
+    }
   }
 
   /**
