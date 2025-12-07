@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -b",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "lint": "eslint src/**/*.ts && node -e \"console.log('\\n✓ All server files pass linting.')\"",
+    "lint:fix": "eslint src/**/*.ts --fix && node -e \"console.log('\\n✓ All server files pass linting.')\""
   },
   "keywords": [],
   "author": "",
@@ -20,11 +22,14 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
     "@types/uuid": "^10.0.0",
+    "eslint": "^9.39.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.1"
   }
 }

@@ -105,7 +105,19 @@ const requestSchema = z.object({
 });
 
 type RenderRequest = z.infer<typeof requestSchema>;
-type TimeRange = { start: number; end: number };
+
+interface TimeRange { 
+  start: number; 
+  end: number;
+}
+
+interface RenderResponse {
+  jobId: string;
+  outputFile: string;
+  segments: TimeRange[];
+  transcoded?: boolean;
+  warning?: string;
+}
 
 app.use(
   cors({
@@ -148,7 +160,7 @@ app.post('/api/render', async (req, res) => {
   
   // Store concatenated source if multiple sources are provided
   let sourceUrl = sources[0]?.url || '';
-  let needsCleanupSingleSource = false;
+  let _needsCleanupSingleSource = false;
   
   // Track if MPD sources are present to use better quality settings throughout
   const hasMpdSource = sources.some(s => s.url.toLowerCase().endsWith('.mpd'));
@@ -375,7 +387,7 @@ app.post('/api/render', async (req, res) => {
       }
       
       sourceUrl = transcodedPath;
-      needsCleanupSingleSource = true;
+      _needsCleanupSingleSource = true;
     }
 
     for (const [index, segment] of keepSegments.entries()) {
@@ -609,7 +621,7 @@ app.post('/api/render', async (req, res) => {
     console.log(`[${jobId}] Sending response...`);
 
     const publicPath = `/output/${path.basename(outputFile)}`;
-    const response: any = {
+    const response: RenderResponse = {
       jobId,
       outputFile: publicPath,
       segments: keepSegments,
@@ -751,7 +763,7 @@ async function probeMpdMetadata(url: string): Promise<{ duration: number; width:
       try {
         const data = JSON.parse(stdout);
         const duration = parseFloat(data.format?.duration ?? '0') || 0;
-        const videoStream = data.streams?.find((s: any) => s.width && s.height);
+        const videoStream = data.streams?.find((s: { width?: number; height?: number }) => s.width && s.height);
         const width = videoStream?.width || 0;
         const height = videoStream?.height || 0;
 
@@ -1035,7 +1047,7 @@ async function downloadFile(url: string, outputPath: string, timeoutMs: number =
       reject(new Error(`Download timeout after ${timeoutMs}ms: ${url}`));
     }, timeoutMs);
     
-    const cleanup = () => {
+    const cleanup = (): void => {
       clearTimeout(timeoutId);
     };
     
@@ -1084,7 +1096,7 @@ function getImageExtension(url: string): string {
   return match && match[1] ? match[1].toLowerCase() : 'png';
 }
 
-async function convertWebpToPng(inputPath: string, outputPath: string, jobId: string): Promise<void> {
+async function convertWebpToPng(inputPath: string, outputPath: string, _jobId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath = ffmpegInstaller.path;
     const child = spawn(ffmpegPath, [
@@ -1120,7 +1132,7 @@ async function convertWebpToPng(inputPath: string, outputPath: string, jobId: st
 }
 
 function buildOverlayFilters(
-  overlays: Array<z.infer<typeof overlaySchema>>,
+  overlays: z.infer<typeof overlaySchema>[],
   imagePaths: string[],
   videoDuration: number
 ): { filterComplex: string; outputStream: string } {
@@ -1180,7 +1192,7 @@ function buildOverlayFilters(
     } else if (overlay.type === 'image' && imageInputIndex - 1 < imagePaths.length) {
       const widthPixels = overlay.width || 200;
       const heightPixels = overlay.height || 200;
-      const opacity = overlay.opacity ?? 1;
+      const _opacity = overlay.opacity ?? 1; // TODO: Add opacity support to overlay filter
       
       console.log(`[Image Overlay] id=${overlay.id}, width=${widthPixels}px, height=${heightPixels}px, x=${overlay.x}%, y=${overlay.y}%`);
       
@@ -1199,8 +1211,8 @@ function buildOverlayFilters(
       // Loop the image for the full video duration to ensure it's available when needed
       const loopSize = Math.ceil(videoDuration * 30); // Estimate frames needed (30 fps)
       
-      // Extract stream name without brackets for scale2ref
-      const currentStreamName = currentStream.replace(/^\[/, '').replace(/\]$/, '');
+      // Extract stream name without brackets for scale2ref (not currently used)
+      const _currentStreamName = currentStream.replace(/^\[/, '').replace(/\]$/, '');
       
       // Scale image to exact pixel dimensions using scale filter (not scale2ref)
       // This gives us precise control over the size
