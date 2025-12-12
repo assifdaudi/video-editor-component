@@ -72,6 +72,18 @@ export interface VideoSource {
   duration?: number | undefined;
 }
 
+export interface AudioSource {
+  url: string;
+  startTime: number;
+  duration: number;
+  originalDuration?: number | undefined;
+  audioTrimStart?: number | undefined;
+  audioTrimEnd?: number | undefined;
+  volume: number;
+  muted?: boolean | undefined;
+  solo?: boolean | undefined;
+}
+
 export interface RenderRequest {
   sources: VideoSource[];
   sourceUrl?: string | undefined;
@@ -79,6 +91,8 @@ export interface RenderRequest {
   trimEnd: number;
   cuts: TimeRange[];
   overlays: Overlay[];
+  audioSources?: AudioSource[] | undefined;
+  audioMixMode?: 'mix' | 'replace' | undefined;
   format: 'mp4';
 }
 

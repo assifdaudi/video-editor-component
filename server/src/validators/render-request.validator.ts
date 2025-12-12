@@ -59,6 +59,18 @@ export const sourceSchema = z.object({
   duration: z.number().min(0.1).optional() // For images, custom duration in seconds
 });
 
+export const audioSourceSchema = z.object({
+  url: z.string().url(),
+  startTime: z.number().min(0),
+  duration: z.number().positive(),
+  originalDuration: z.number().positive().optional(),
+  audioTrimStart: z.number().min(0).optional(),
+  audioTrimEnd: z.number().positive().optional(),
+  volume: z.number().min(0).max(1),
+  muted: z.boolean().optional(),
+  solo: z.boolean().optional()
+});
+
 export const requestSchema = z.object({
   sources: z.array(sourceSchema).min(1),
   // Legacy support for single sourceUrl
@@ -74,6 +86,8 @@ export const requestSchema = z.object({
     )
     .default([]),
   overlays: z.array(overlaySchema).default([]),
+  audioSources: z.array(audioSourceSchema).default([]),
+  audioMixMode: z.enum(['mix', 'replace']).default('mix'),
   format: z.enum(['mp4']).default('mp4')
 });
 
