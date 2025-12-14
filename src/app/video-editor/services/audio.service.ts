@@ -95,6 +95,7 @@ export class AudioService {
       startTime,
       duration,
       originalDuration: originalDur, // Store original duration
+      originalStartTime: startTime, // Store original timeline position
       audioTrimStart: 0, // Start from beginning of audio file
       audioTrimEnd: originalDur, // End at full duration
       volume,
@@ -261,8 +262,11 @@ export class AudioService {
     console.log(`[AudioService] Cuts:`, timelineCuts.map(c => `[${c.start}s - ${c.end}s]`));
 
     for (const audio of current) {
-      let audioStart = audio.startTime;
-      let audioEnd = audio.startTime + audio.duration;
+      // Use originalStartTime if available, otherwise use current startTime
+      // This allows us to recalculate correctly even after previous adjustments
+      const originalAudioStart = audio.originalStartTime ?? audio.startTime;
+      let audioStart = originalAudioStart;
+      let audioEnd = originalAudioStart + audio.duration;
       
       console.log(`[AudioService] Checking audio ${audio.id}: [${audioStart}s - ${audioEnd}s]`);
       
@@ -285,7 +289,8 @@ export class AudioService {
             adjusted.push({
               ...audio,
               startTime: adjustedStart,
-              duration: finalDuration
+              duration: finalDuration,
+              originalStartTime: audioStart // Preserve original position for future adjustments
             });
           }
         }
@@ -360,12 +365,33 @@ export class AudioService {
           
           if (finalDuration > 0) {
             const segmentId = segments.length > 1 ? audio.id + (segments.indexOf(segment) * 0.001) : audio.id;
-            console.log(`[AudioService] Keeping segment of audio ${audio.id}: [${segment.start}s - ${segment.end}s] -> [${adjustedSegmentStart}s - ${adjustedSegmentStart + finalDuration}s]`);
+            
+            // Calculate which portion of the original audio file this segment represents
+            // Segment times are in the original timeline, we need to map them to the audio file timeline
+            const audioTrimStart = audio.audioTrimStart ?? 0;
+            const audioTrimEnd = audio.audioTrimEnd ?? audio.originalDuration ?? audio.duration;
+            const audioFileDuration = audioTrimEnd - audioTrimStart;
+            
+            // Calculate offset from the original audio's start time on the timeline
+            const segmentOffsetFromAudioStart = segment.start - audioStart;
+            const segmentEndOffsetFromAudioStart = segment.end - audioStart;
+            
+            // Map timeline offsets to audio file positions
+            // The audio's timeline duration is audio.duration, and it maps to audioFileDuration in the file
+            // Use audio.duration as the timeline duration (how long the audio plays on the timeline)
+            const timelineDuration = audio.duration || audioFileDuration; // Fallback if duration is 0
+            const segmentAudioTrimStart = audioTrimStart + (segmentOffsetFromAudioStart / timelineDuration) * audioFileDuration;
+            const segmentAudioTrimEnd = audioTrimStart + (segmentEndOffsetFromAudioStart / timelineDuration) * audioFileDuration;
+            
+            console.log(`[AudioService] Keeping segment of audio ${audio.id}: [${segment.start}s - ${segment.end}s] -> [${adjustedSegmentStart}s - ${adjustedSegmentStart + finalDuration}s], audio file: [${segmentAudioTrimStart.toFixed(2)}s - ${segmentAudioTrimEnd.toFixed(2)}s]`);
             adjusted.push({
               ...audio,
               id: segmentId,
               startTime: adjustedSegmentStart,
-              duration: finalDuration
+              duration: finalDuration,
+              originalStartTime: segment.start, // Store original timeline position for this segment
+              audioTrimStart: segmentAudioTrimStart,
+              audioTrimEnd: segmentAudioTrimEnd
             });
           }
         }

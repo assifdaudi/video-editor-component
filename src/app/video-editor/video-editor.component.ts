@@ -783,6 +783,9 @@ export class VideoEditorComponent implements OnDestroy {
     const result = this.timelineService.addSegment(start, end);
     if (!result.success && result.error) {
       this.errorMessage.set(result.error);
+    } else {
+      // Adjust audio for the new segment (which creates cuts around it)
+      this.adjustAudioForCuts();
     }
   }
 
@@ -993,6 +996,8 @@ export class VideoEditorComponent implements OnDestroy {
         } else {
           // Update segment selection to the added segment
           this.timelineService.setSegmentSelection(selection.start, selection.end);
+          // Adjust audio for the new segment (which creates cuts around it)
+          this.adjustAudioForCuts();
         }
       } else {
         const result = this.timelineService.addCut(selection.start, selection.end);
@@ -1001,6 +1006,8 @@ export class VideoEditorComponent implements OnDestroy {
         } else {
           // Update cut selection to the added cut
           this.timelineService.setCutSelection(selection.start, selection.end);
+          // Adjust audio for the new cut
+          this.adjustAudioForCuts();
         }
       }
     }
@@ -1907,9 +1914,16 @@ export class VideoEditorComponent implements OnDestroy {
     const result = this.audioService.addAudioSource(url, startTime, adjustedDuration, volume, duration);
     
     if (result.success) {
+      // If there are existing cuts, adjust the newly added audio for them
+      const cuts = this.cutsRaw();
+      if (cuts.length > 0) {
+        this.adjustAudioForCuts();
+      } else {
+        this.initializeAudioPlayback();
+      }
+      
       this.closeAudioForm();
       this.errorMessage.set('');
-      this.initializeAudioPlayback();
     } else {
       this.errorMessage.set(result.error || 'Failed to add audio source');
     }
@@ -2349,17 +2363,26 @@ export class VideoEditorComponent implements OnDestroy {
 
     console.log(`[VideoEditor] Adjusting audio for ${cuts.length} cut(s)`);
     const videoDuration = this.duration();
-    const audioBefore = this.audioSources().length;
+    const audioBefore = this.audioSources();
+    console.log(`[VideoEditor] Audio before adjustment:`, audioBefore.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
+    
+    // Clean up all existing audio elements before adjusting
+    // This ensures that when audio is split, old elements are properly removed
+    this.cleanupAudioElements();
     
     this.audioService.adjustAudioForCuts(
       cuts.map(c => ({ start: c.start, end: c.end })),
       videoDuration
     );
     
-    const audioAfter = this.audioSources().length;
-    console.log(`[VideoEditor] Audio adjustment: ${audioBefore} -> ${audioAfter} tracks`);
+    const audioAfter = this.audioSources();
+    console.log(`[VideoEditor] Audio after adjustment:`, audioAfter.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
+    console.log(`[VideoEditor] Audio adjustment: ${audioBefore.length} -> ${audioAfter.length} tracks`);
     
-    // Reinitialize playback with adjusted audio
+    // Force change detection to update UI
+    this.cdr.detectChanges();
+    
+    // Reinitialize playback with adjusted audio (will create new elements)
     this.initializeAudioPlayback();
   }
 }
