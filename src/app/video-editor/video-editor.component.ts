@@ -20,14 +20,17 @@ import {
   Overlay,
   RenderResponse,
   TimelineDrag,
-  VideoBounds
+  VideoBounds,
+  AudioSource,
+  AudioTimelineDrag
 } from './video-editor.types';
 import { formatTime, clamp } from './video-editor.utils';
 import { 
   RenderService, 
   VideoPlayerService, 
   OverlayService, 
-  TimelineService 
+  TimelineService,
+  AudioService
 } from './services';
 
 @Component({
@@ -51,6 +54,7 @@ export class VideoEditorComponent implements OnDestroy {
   private readonly playerService = inject(VideoPlayerService);
   private readonly overlayService = inject(OverlayService);
   private readonly timelineService = inject(TimelineService);
+  private readonly audioService = inject(AudioService);
 
   /* eslint-disable @typescript-eslint/member-ordering */
   // Protected fields (must come after fb/http due to dependencies)
@@ -74,6 +78,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly editingSourceId = signal<number | null>(null); // ID of source being edited
   protected readonly showOverlayForm = signal(false);
   protected readonly overlayFormType = signal<'text' | 'image' | 'shape'>('text');
+  protected readonly showAudioForm = signal(false);
+  protected readonly editingAudioId = signal<number | null>(null);
   protected readonly renderBusy = signal(false);
   protected readonly renderResult = signal<RenderResponse | null>(null);
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
@@ -105,19 +111,50 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly overlays = this.overlayService.getOverlays();
   protected readonly overlaySelection = this.overlayService.getSelectedOverlay();
 
+  // Audio service signals
+  protected readonly audioSources = this.audioService.getAudioSources();
+  protected readonly masterVolume = this.audioService.getMasterVolume();
+  protected readonly audioMixMode = this.audioService.getAudioMixMode();
+  protected readonly hasAudio = this.audioService.getHasAudio();
+  protected readonly activeAudioSources = this.audioService.getActiveAudioSources();
+
   protected readonly canRender = computed(
     () => this.sourceLoaded() && this.duration() > 0 && !this.loading()
   );
 
   protected hasOverlays = computed(() => this.overlays().length > 0);
+
+  // Expose Math for template
+  protected readonly Math = Math;
+
+  /**
+   * Calculate the height needed for the audio timeline based on number of tracks
+   */
+  protected readonly audioTimelineHeight = computed(() => {
+    const audio = this.audioSources();
+    if (audio.length === 0) return 56;
+
+    // Find the maximum track index
+    let maxTrackIndex = 0;
+    for (const a of audio) {
+      const trackIdx = this.getAudioTrackIndex(a);
+      maxTrackIndex = Math.max(maxTrackIndex, trackIdx);
+    }
+
+    // Each track is 44px tall with 6px padding top and bottom
+    return Math.max(56, 6 + (maxTrackIndex + 1) * 44 + 6);
+  });
   /* eslint-enable @typescript-eslint/member-ordering */
 
   // Private fields (remaining)
   private readonly minGap = 0.1;
   private timelineDrag: TimelineDrag = null;
+  private audioTimelineDrag: AudioTimelineDrag | null = null;
   private nextSourceId = 1;
   private isLoadingSource = false;
   private keyboardListener?: (event: KeyboardEvent) => void;
+  private audioElements = new Map<number, HTMLAudioElement>(); // Map audio ID to audio element
+  private audioPlaybackInterval?: number;
 
   // Constructor
   constructor() {
@@ -144,6 +181,14 @@ export class VideoEditorComponent implements OnDestroy {
   ngOnDestroy(): void {
     // Clean up video player service
     this.playerService.cleanup();
+    
+    // Clean up audio elements
+    this.cleanupAudioElements();
+    
+    // Clean up audio playback interval
+    if (this.audioPlaybackInterval) {
+      clearInterval(this.audioPlaybackInterval);
+    }
     
     // Clean up keyboard listener
     if (this.keyboardListener) {
@@ -469,6 +514,8 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   protected onMetadataLoaded(): void {
+    // Initialize audio playback when video metadata is loaded
+    this.initializeAudioPlayback();
     const video = this.videoElement?.nativeElement;
     if (!video) {
       return;
@@ -576,8 +623,14 @@ export class VideoEditorComponent implements OnDestroy {
     }
     if (video.paused) {
       void video.play();
+      // Start audio playback
+      this.initializeAudioPlayback();
     } else {
       video.pause();
+      // Pause all audio
+      this.audioElements.forEach(audioEl => {
+        audioEl.pause();
+      });
     }
   }
 
@@ -708,12 +761,16 @@ export class VideoEditorComponent implements OnDestroy {
       const result = this.timelineService.addSegment(start, end);
       if (!result.success && result.error) {
         this.errorMessage.set(result.error);
+      } else {
+        this.adjustAudioForCuts();
       }
     } else {
       const { start, end } = this.cutSelection();
       const result = this.timelineService.addCut(start, end);
       if (!result.success && result.error) {
         this.errorMessage.set(result.error);
+      } else {
+        this.adjustAudioForCuts();
       }
     }
   }
@@ -726,6 +783,9 @@ export class VideoEditorComponent implements OnDestroy {
     const result = this.timelineService.addSegment(start, end);
     if (!result.success && result.error) {
       this.errorMessage.set(result.error);
+    } else {
+      // Adjust audio for the new segment (which creates cuts around it)
+      this.adjustAudioForCuts();
     }
   }
 
@@ -740,6 +800,9 @@ export class VideoEditorComponent implements OnDestroy {
     if (cut && selection.start === cut.start && selection.end === cut.end) {
       this.timelineService.setCutSelection(0, 0);
     }
+    
+    // Adjust audio positions
+    this.adjustAudioForCuts();
     
     // Force immediate change detection
     this.cdr.detectChanges();
@@ -756,6 +819,9 @@ export class VideoEditorComponent implements OnDestroy {
     if (segment && selection.start === segment.start && selection.end === segment.end) {
       this.timelineService.setSegmentSelection(0, 0);
     }
+    
+    // Adjust audio positions
+    this.adjustAudioForCuts();
     
     // Force immediate change detection
     this.cdr.detectChanges();
@@ -801,6 +867,69 @@ export class VideoEditorComponent implements OnDestroy {
     }
     return plan;
   }
+
+  /**
+   * Get the left position percentage for an audio clip, ensuring it doesn't go negative
+   */
+  protected getAudioClipLeft(audio: AudioSource): number {
+    return Math.max(0, this.percentFor(audio.startTime));
+  }
+
+  /**
+   * Get the width percentage for an audio clip, ensuring it doesn't extend beyond the timeline
+   */
+  protected getAudioClipWidth(audio: AudioSource): number {
+    const left = this.getAudioClipLeft(audio);
+    const endTime = audio.startTime + audio.duration;
+    const endPercent = Math.min(100, this.percentFor(endTime));
+    return Math.max(0, Math.min(endPercent - left, 100 - left));
+  }
+
+  /**
+   * Calculate vertical track index for audio clips to stack overlapping clips
+   */
+  protected getAudioTrackIndex(audio: AudioSource): number {
+    const allAudio = this.audioSources();
+    const currentIndex = allAudio.findIndex(a => a.id === audio.id);
+    if (currentIndex === -1) return 0;
+
+    // Find all audio clips that overlap with this one
+    const overlapping: number[] = [];
+    const currentStart = audio.startTime;
+    const currentEnd = audio.startTime + audio.duration;
+
+    for (let i = 0; i < currentIndex; i++) {
+      const other = allAudio[i];
+      if (!other) continue;
+      const otherStart = other.startTime;
+      const otherEnd = other.startTime + other.duration;
+
+      // Check if they overlap
+      if (
+        (currentStart >= otherStart && currentStart < otherEnd) ||
+        (currentEnd > otherStart && currentEnd <= otherEnd) ||
+        (currentStart <= otherStart && currentEnd >= otherEnd)
+      ) {
+        overlapping.push(i);
+      }
+    }
+
+    // Find the lowest available track index
+    const usedTracks = new Set<number>();
+    for (const idx of overlapping) {
+      const trackIdx = this.getAudioTrackIndex(allAudio[idx]!);
+      usedTracks.add(trackIdx);
+    }
+
+    // Find first available track
+    let trackIndex = 0;
+    while (usedTracks.has(trackIndex)) {
+      trackIndex++;
+    }
+
+    return trackIndex;
+  }
+
 
   protected percentFor(time: number): number {
     const duration = this.duration();
@@ -867,6 +996,8 @@ export class VideoEditorComponent implements OnDestroy {
         } else {
           // Update segment selection to the added segment
           this.timelineService.setSegmentSelection(selection.start, selection.end);
+          // Adjust audio for the new segment (which creates cuts around it)
+          this.adjustAudioForCuts();
         }
       } else {
         const result = this.timelineService.addCut(selection.start, selection.end);
@@ -875,6 +1006,8 @@ export class VideoEditorComponent implements OnDestroy {
         } else {
           // Update cut selection to the added cut
           this.timelineService.setCutSelection(selection.start, selection.end);
+          // Adjust audio for the new cut
+          this.adjustAudioForCuts();
         }
       }
     }
@@ -1406,7 +1539,9 @@ export class VideoEditorComponent implements OnDestroy {
       this.trimStart(),
       this.trimEnd(),
       effectiveCuts,
-      this.overlays()
+      this.overlays(),
+      this.audioSources(),
+      this.audioMixMode()
     ).subscribe({
       next: response => {
         this.renderResult.set(response);
@@ -1729,5 +1864,525 @@ export class VideoEditorComponent implements OnDestroy {
 
   private clamp(value: number, min: number, max: number): number {
     return clamp(value, min, max);
+  }
+
+  // ========== Audio Management Methods ==========
+
+  /**
+   * Add an audio source
+   */
+  protected async addAudioSource(): Promise<void> {
+    const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
+    const audioStartInput = document.getElementById('audioStart') as HTMLInputElement;
+    const audioVolumeInput = document.getElementById('audioVolume') as HTMLInputElement;
+
+    if (!audioUrlInput || !audioStartInput || !audioVolumeInput) {
+      this.errorMessage.set('Audio form inputs not found');
+      return;
+    }
+
+    const url = audioUrlInput.value.trim();
+    const startTime = parseFloat(audioStartInput.value) || this.currentTime();
+    const volume = parseFloat(audioVolumeInput.value) || 1;
+
+    if (!url) {
+      this.errorMessage.set('Audio URL is required');
+      return;
+    }
+
+    // Get audio duration
+    let duration = 0;
+    try {
+      duration = await this.getAudioDuration(url);
+      if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+        throw new Error(`Invalid duration (${duration}) for audio: ${url}`);
+      }
+    } catch (error) {
+      this.errorMessage.set(`Failed to load audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return;
+    }
+
+    // Ensure audio doesn't extend beyond video duration
+    const maxDuration = this.duration();
+    const adjustedDuration = Math.min(duration, maxDuration - startTime);
+    
+    if (adjustedDuration <= 0) {
+      this.errorMessage.set('Audio would be completely outside video duration');
+      return;
+    }
+
+    const result = this.audioService.addAudioSource(url, startTime, adjustedDuration, volume, duration);
+    
+    if (result.success) {
+      // If there are existing cuts, adjust the newly added audio for them
+      const cuts = this.cutsRaw();
+      if (cuts.length > 0) {
+        this.adjustAudioForCuts();
+      } else {
+        this.initializeAudioPlayback();
+      }
+      
+      this.closeAudioForm();
+      this.errorMessage.set('');
+    } else {
+      this.errorMessage.set(result.error || 'Failed to add audio source');
+    }
+  }
+
+  /**
+   * Get audio duration
+   */
+  private async getAudioDuration(url: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const audio = new Audio();
+      audio.preload = 'metadata';
+      
+      audio.addEventListener('loadedmetadata', () => {
+        resolve(audio.duration);
+        audio.src = '';
+      });
+      
+      audio.addEventListener('error', () => {
+        reject(new Error('Failed to load audio metadata'));
+        audio.src = '';
+      });
+      
+      audio.src = url;
+    });
+  }
+
+  /**
+   * Remove an audio source
+   */
+  protected removeAudioSource(id: number): void {
+    this.audioService.removeAudioSource(id);
+    this.cleanupAudioElement(id);
+    this.initializeAudioPlayback();
+  }
+
+  /**
+   * Open audio form
+   */
+  protected openAudioForm(): void {
+    this.showAudioForm.set(true);
+    this.errorMessage.set('');
+  }
+
+  /**
+   * Close audio form
+   */
+  protected closeAudioForm(): void {
+    this.showAudioForm.set(false);
+  }
+
+  /**
+   * Initialize audio playback and sync with video
+   */
+  private initializeAudioPlayback(): void {
+    // Get current audio sources to clean up elements for removed audio
+    const currentAudioIds = new Set(this.audioSources().map(a => a.id));
+    
+    // Clean up audio elements that no longer exist
+    this.audioElements.forEach((audioEl, id) => {
+      if (!currentAudioIds.has(id)) {
+        console.log(`[VideoEditor] Cleaning up audio element for removed track ${id}`);
+        this.cleanupAudioElement(id);
+      }
+    });
+
+    const activeAudio = this.activeAudioSources();
+    const masterVolume = this.masterVolume();
+
+    console.log(`[VideoEditor] Initializing audio playback for ${activeAudio.length} active audio source(s)`);
+    activeAudio.forEach(audio => {
+      console.log(`[VideoEditor] Creating audio element for track ${audio.id}: [${audio.startTime}s - ${audio.startTime + audio.duration}s]`);
+    });
+
+    // Create or update audio elements for active audio sources
+    activeAudio.forEach(audio => {
+      let audioEl = this.audioElements.get(audio.id);
+      
+      if (!audioEl) {
+        // Create new audio element
+        audioEl = new Audio(audio.url);
+        audioEl.preload = 'auto';
+        this.audioElements.set(audio.id, audioEl);
+      }
+      
+      // Update volume
+      audioEl.volume = audio.volume * masterVolume;
+    });
+
+    // Set up sync with video playback
+    this.syncAudioWithVideo();
+  }
+
+  /**
+   * Sync audio playback with video
+   */
+  private syncAudioWithVideo(): void {
+    // Clear existing interval
+    if (this.audioPlaybackInterval) {
+      clearInterval(this.audioPlaybackInterval);
+    }
+
+    // Sync audio every 100ms
+    this.audioPlaybackInterval = window.setInterval(() => {
+      const video = this.videoElement?.nativeElement;
+      if (!video) return;
+
+      const currentTime = this.currentTime();
+      const isPlaying = !video.paused;
+      const activeAudio = this.activeAudioSources();
+      const masterVolume = this.masterVolume();
+
+      activeAudio.forEach(audio => {
+        const audioEl = this.audioElements.get(audio.id);
+        if (!audioEl) return;
+
+        const audioStart = audio.startTime;
+        const audioEnd = audio.startTime + audio.duration;
+
+        // Update volume
+        audioEl.volume = audio.volume * masterVolume;
+
+        if (currentTime >= audioStart && currentTime < audioEnd) {
+          // Audio should be playing
+          // Calculate position within the trimmed audio
+          const timelineOffset = currentTime - audioStart;
+          // Add the trim start to get the position in the original audio file
+          const audioTrimStart = audio.audioTrimStart ?? 0;
+          const audioTrimEnd = audio.audioTrimEnd ?? audio.originalDuration ?? audio.duration;
+          const audioCurrentTime = audioTrimStart + timelineOffset;
+          
+          // Ensure we don't play beyond the trim end
+          if (audioCurrentTime >= audioTrimEnd) {
+            audioEl.pause();
+            return;
+          }
+          
+          if (Math.abs(audioEl.currentTime - audioCurrentTime) > 0.1) {
+            audioEl.currentTime = audioCurrentTime;
+          }
+
+          if (isPlaying && audioEl.paused) {
+            void audioEl.play();
+          } else if (!isPlaying && !audioEl.paused) {
+            audioEl.pause();
+          }
+        } else {
+          // Audio should be paused
+          if (!audioEl.paused) {
+            audioEl.pause();
+          }
+          // Reset position if we're before the audio start
+          if (currentTime < audioStart) {
+            audioEl.currentTime = audio.audioTrimStart ?? 0;
+          }
+        }
+      });
+    }, 100);
+  }
+
+  /**
+   * Clean up a specific audio element
+   */
+  private cleanupAudioElement(id: number): void {
+    const audioEl = this.audioElements.get(id);
+    if (audioEl) {
+      audioEl.pause();
+      audioEl.src = '';
+      audioEl.load();
+      this.audioElements.delete(id);
+    }
+  }
+
+  /**
+   * Clean up all audio elements
+   */
+  private cleanupAudioElements(): void {
+    this.audioElements.forEach((audioEl) => {
+      audioEl.pause();
+      audioEl.src = '';
+      audioEl.load();
+    });
+    this.audioElements.clear();
+  }
+
+  /**
+   * Update audio volume
+   */
+  protected updateAudioVolume(id: number, volume: number): void {
+    const result = this.audioService.setAudioVolume(id, volume);
+    if (!result.success) {
+      this.errorMessage.set(result.error || 'Failed to update audio volume');
+    } else {
+      const audioEl = this.audioElements.get(id);
+      if (audioEl) {
+        audioEl.volume = volume * this.masterVolume();
+      }
+    }
+  }
+
+  /**
+   * Toggle mute for audio source
+   */
+  protected toggleAudioMute(id: number): void {
+    this.audioService.toggleMute(id);
+    this.initializeAudioPlayback();
+  }
+
+  /**
+   * Toggle solo for audio source
+   */
+  protected toggleAudioSolo(id: number): void {
+    this.audioService.toggleSolo(id);
+    this.initializeAudioPlayback();
+  }
+
+  /**
+   * Update master volume
+   */
+  protected updateMasterVolume(volume: number): void {
+    const result = this.audioService.setMasterVolume(volume);
+    if (!result.success) {
+      this.errorMessage.set(result.error || 'Failed to update master volume');
+    } else {
+      // Update all audio elements
+      this.audioElements.forEach((audioEl, id) => {
+        const audio = this.audioSources().find(a => a.id === id);
+        if (audio) {
+          audioEl.volume = audio.volume * volume;
+        }
+      });
+    }
+  }
+
+  /**
+   * Set audio mix mode
+   */
+  protected setAudioMixMode(mode: 'mix' | 'replace'): void {
+    this.audioService.setAudioMixMode(mode);
+  }
+
+  /**
+   * Handle audio timeline pointer down (for dragging)
+   */
+  protected onAudioTimelinePointerDown(event: PointerEvent, audio: AudioSource): void {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const timeline = (event.currentTarget as HTMLElement).closest('.audio-timeline');
+    if (!timeline) return;
+
+    const rect = timeline.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    
+    // Calculate the offset from the start of the audio clip
+    const percent = (x / rect.width) * 100;
+    const clickTime = (percent / 100) * this.duration();
+    const offsetFromStart = clickTime - audio.startTime;
+
+    // Store original values and offset
+    this.audioTimelineDrag = {
+      audioId: audio.id,
+      startX: x,
+      startTime: audio.startTime,
+      originalDuration: audio.duration,
+      offsetFromStart: Math.max(0, Math.min(offsetFromStart, audio.duration))
+    } as AudioTimelineDrag & { originalDuration: number; offsetFromStart: number };
+
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  /**
+   * Handle audio timeline pointer move (for dragging)
+   */
+  protected onAudioTimelinePointerMove(event: PointerEvent): void {
+    if (!this.audioTimelineDrag) return;
+
+    const timeline = (event.currentTarget as HTMLElement).closest('.audio-timeline');
+    if (!timeline) return;
+
+    const rect = timeline.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percent = (x / rect.width) * 100;
+    const clickTime = (percent / 100) * this.duration();
+    
+    // Calculate new start time based on drag offset
+    const dragState = this.audioTimelineDrag as AudioTimelineDrag & { 
+      originalDuration: number; 
+      offsetFromStart: number;
+    };
+    
+    // Calculate new start time: where we clicked minus the offset
+    let newStartTime = clickTime - dragState.offsetFromStart;
+    
+    // Constrain: audio cannot extend beyond video duration
+    // Maximum start time is video duration minus original audio duration
+    const maxStartTime = Math.max(0, this.duration() - dragState.originalDuration);
+    newStartTime = Math.max(0, Math.min(newStartTime, maxStartTime));
+
+    // Update position - always use original duration during drag
+    // The duration will only be adjusted on drop if it extends beyond video
+    const audio = this.audioSources().find(a => a.id === this.audioTimelineDrag!.audioId);
+    if (!audio) return;
+
+    // During drag, always preserve original duration for visual consistency
+    // Only update the start time - this prevents the shrinking issue
+    const updates: Partial<AudioSource> = { 
+      startTime: newStartTime,
+      duration: dragState.originalDuration // Always use original during drag
+    };
+
+    // Check for overlaps with other audio (excluding current)
+    const otherAudio = this.audioSources().filter(a => a.id !== this.audioTimelineDrag!.audioId);
+    const wouldOverlap = otherAudio.some(a => {
+      const aEnd = a.startTime + a.duration;
+      const newEnd = newStartTime + dragState.originalDuration;
+      return (
+        (newStartTime >= a.startTime && newStartTime < aEnd) ||
+        (newEnd > a.startTime && newEnd <= aEnd) ||
+        (newStartTime <= a.startTime && newEnd >= aEnd)
+      );
+    });
+
+    if (!wouldOverlap) {
+      this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, updates);
+    }
+  }
+
+  /**
+   * Handle audio timeline pointer up (end dragging)
+   */
+  protected onAudioTimelinePointerUp(event: PointerEvent): void {
+    if (this.audioTimelineDrag) {
+      const dragState = this.audioTimelineDrag as AudioTimelineDrag & { 
+        originalDuration: number; 
+      };
+      
+      // Get current audio state
+      const audio = this.audioSources().find(a => a.id === this.audioTimelineDrag!.audioId);
+      
+      if (audio) {
+        // Check if audio extends beyond video duration and adjust if needed
+        const endTime = audio.startTime + audio.duration;
+        if (endTime > this.duration()) {
+          // Adjust duration to fit within video
+          const adjustedDuration = Math.max(0, this.duration() - audio.startTime);
+          if (adjustedDuration > 0 && adjustedDuration !== audio.duration) {
+            this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, { 
+              duration: adjustedDuration 
+            });
+          }
+        } else if (audio.duration !== dragState.originalDuration) {
+          // Restore original duration if it was shortened during drag
+          this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, { 
+            duration: dragState.originalDuration 
+          });
+        }
+      }
+      
+      (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+      // Reinitialize playback after drag is complete
+      this.initializeAudioPlayback();
+      this.audioTimelineDrag = null;
+    }
+  }
+
+  /**
+   * Start editing audio trim points
+   */
+  protected startEditingAudio(id: number): void {
+    this.editingAudioId.set(id);
+  }
+
+  /**
+   * Cancel editing audio
+   */
+  protected cancelEditingAudio(): void {
+    this.editingAudioId.set(null);
+  }
+
+  /**
+   * Update audio trim points
+   */
+  protected updateAudioTrim(id: number, trimStart: number, trimEnd: number): void {
+    const audio = this.audioSources().find(a => a.id === id);
+    if (!audio) return;
+
+    // Validate trim points
+    if (trimStart < 0 || trimStart >= trimEnd || trimEnd > audio.originalDuration) {
+      this.errorMessage.set('Invalid trim points');
+      return;
+    }
+
+    // Calculate new duration based on trim
+    const trimmedDuration = trimEnd - trimStart;
+    
+    // Check if the trimmed audio would still fit in the video timeline
+    const maxDuration = this.duration();
+    const endTime = audio.startTime + trimmedDuration;
+    
+    if (endTime > maxDuration) {
+      // Adjust timeline duration to fit
+      const adjustedDuration = maxDuration - audio.startTime;
+      if (adjustedDuration <= 0) {
+        this.errorMessage.set('Trimmed audio would be outside video duration');
+        return;
+      }
+      
+      // Update both trim and duration
+      this.audioService.updateAudioSource(id, {
+        audioTrimStart: trimStart,
+        audioTrimEnd: trimStart + adjustedDuration,
+        duration: adjustedDuration
+      });
+    } else {
+      // Update trim points and duration
+      this.audioService.updateAudioSource(id, {
+        audioTrimStart: trimStart,
+        audioTrimEnd: trimEnd,
+        duration: trimmedDuration
+      });
+    }
+
+    this.editingAudioId.set(null);
+    this.initializeAudioPlayback();
+  }
+
+  /**
+   * Adjust audio positions when cuts are applied
+   */
+  private adjustAudioForCuts(): void {
+    const cuts = this.cutsRaw();
+    if (cuts.length === 0) {
+      console.log(`[VideoEditor] No cuts to adjust audio for`);
+      return;
+    }
+
+    console.log(`[VideoEditor] Adjusting audio for ${cuts.length} cut(s)`);
+    const videoDuration = this.duration();
+    const audioBefore = this.audioSources();
+    console.log(`[VideoEditor] Audio before adjustment:`, audioBefore.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
+    
+    // Clean up all existing audio elements before adjusting
+    // This ensures that when audio is split, old elements are properly removed
+    this.cleanupAudioElements();
+    
+    this.audioService.adjustAudioForCuts(
+      cuts.map(c => ({ start: c.start, end: c.end })),
+      videoDuration
+    );
+    
+    const audioAfter = this.audioSources();
+    console.log(`[VideoEditor] Audio after adjustment:`, audioAfter.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
+    console.log(`[VideoEditor] Audio adjustment: ${audioBefore.length} -> ${audioAfter.length} tracks`);
+    
+    // Force change detection to update UI
+    this.cdr.detectChanges();
+    
+    // Reinitialize playback with adjusted audio (will create new elements)
+    this.initializeAudioPlayback();
   }
 }

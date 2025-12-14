@@ -77,6 +77,15 @@ export async function renderVideo(
       jobId
     );
     
+    // Prepare audio sources
+    const { audioPaths, hasAudio } = await prepareAudioSources(
+      request.audioSources || [],
+      tempDir,
+      jobId,
+      totalDuration,
+      onProgress
+    );
+    
     // Final render
     const outputFile = await finalRender(
       segmentPaths,
@@ -90,6 +99,9 @@ export async function renderVideo(
       tempDir,
       jobId,
       request.format,
+      audioPaths,
+      hasAudio,
+      request.audioMixMode || 'mix',
       onProgress
     );
     
@@ -268,7 +280,146 @@ async function prepareOverlays(
 }
 
 /**
- * Final render with concatenation and overlays
+ * Prepare audio sources (download and process)
+ */
+async function prepareAudioSources(
+  audioSources: RenderRequest['audioSources'],
+  tempDir: string,
+  jobId: string,
+  totalDuration: number,
+  _onProgress?: (progress: number, jobId: string) => void
+): Promise<{ audioPaths: Array<{ path: string; startTime: number; volume: number }>; hasAudio: boolean }> {
+  if (!audioSources || audioSources.length === 0) {
+    return { audioPaths: [], hasAudio: false };
+  }
+
+  // Filter out muted audio and handle solo
+  const hasSolo = audioSources.some(a => a.solo);
+  const activeAudio = audioSources.filter(a => {
+    if (hasSolo) {
+      return a.solo && !a.muted;
+    }
+    return !a.muted;
+  });
+
+  if (activeAudio.length === 0) {
+    return { audioPaths: [], hasAudio: false };
+  }
+
+  console.log(`[${jobId}] Processing ${activeAudio.length} audio source(s)...`);
+
+  const audioPaths: Array<{ path: string; startTime: number; volume: number }> = [];
+
+  for (const [index, audio] of activeAudio.entries()) {
+    try {
+      // Download audio file
+      const audioExt = path.extname(new URL(audio.url).pathname) || '.mp3';
+      const audioPath = path.join(tempDir, `audio-${index}${audioExt}`);
+      
+      console.log(`[${jobId}] Downloading audio ${index + 1}/${activeAudio.length}: ${audio.url}`);
+      await downloadFile(audio.url, audioPath);
+      await fsp.access(audioPath);
+
+      let finalAudioPath = audioPath;
+      const audioTrimStart = audio.audioTrimStart ?? 0;
+      const audioTrimEnd = audio.audioTrimEnd ?? audio.originalDuration ?? audio.duration;
+      const audioTrimDuration = audioTrimEnd - audioTrimStart;
+
+      // Calculate timeline trim duration (if audio extends beyond video duration)
+      const audioEndTime = audio.startTime + audio.duration;
+      const needsTimelineTrim = audioEndTime > totalDuration;
+      const timelineTrimDuration = needsTimelineTrim ? totalDuration - audio.startTime : null;
+      
+      if (needsTimelineTrim && timelineTrimDuration !== null && timelineTrimDuration <= 0) {
+        // Audio starts after video ends, skip it
+        continue;
+      }
+
+      // Determine what processing is needed
+      const needsTrim = audioTrimStart > 0 || audioTrimEnd < (audio.originalDuration ?? audio.duration);
+      const needsVolume = audio.volume !== 1.0;
+      const needsProcessing = needsTrim || needsVolume || needsTimelineTrim;
+
+      // If we need any processing, do it all in one FFmpeg pass
+      if (needsProcessing) {
+        // Use .m4a extension for AAC output (more reliable than .mp3)
+        const processedPath = path.join(tempDir, `audio-${index}-processed.m4a`);
+        const ffmpegArgs = [
+          '-hide_banner',
+          '-y',
+          '-i', audioPath
+        ];
+
+        // Always explicitly map the first audio stream first
+        ffmpegArgs.push('-map', '0:a:0');
+
+        // Seek to trim start (audio file trim) - put after input for better accuracy
+        if (audioTrimStart > 0) {
+          ffmpegArgs.push('-ss', audioTrimStart.toFixed(3));
+        }
+
+        // Duration to extract (use the smaller of trim duration or timeline trim duration)
+        const extractDuration = needsTimelineTrim && timelineTrimDuration !== null 
+          ? Math.min(timelineTrimDuration, audioTrimDuration)
+          : audioTrimDuration;
+        ffmpegArgs.push('-t', extractDuration.toFixed(3));
+
+        // Build filter chain
+        const filters: string[] = [];
+        
+        // Apply volume if needed
+        if (needsVolume) {
+          filters.push(`volume=${audio.volume.toFixed(3)}`);
+        }
+
+        // Apply filters if any (use -af instead of -filter:a for consistency)
+        if (filters.length > 0) {
+          ffmpegArgs.push('-af', filters.join(','));
+        }
+
+        // Always encode to AAC with explicit parameters
+        ffmpegArgs.push(
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-ar', '44100', // Explicit sample rate
+          '-ac', '2', // Explicit stereo
+          processedPath
+        );
+
+        await runFfmpegWithProgress(
+          ffmpegArgs,
+          jobId,
+          () => {},
+          extractDuration
+        );
+        finalAudioPath = processedPath;
+        
+        if (needsTrim) {
+          console.log(`[${jobId}] Trimmed audio: ${audioTrimStart.toFixed(3)}s - ${audioTrimEnd.toFixed(3)}s`);
+        }
+        if (needsTimelineTrim) {
+          console.log(`[${jobId}] Timeline trimmed audio to fit video duration`);
+        }
+      }
+
+      audioPaths.push({
+        path: finalAudioPath,
+        startTime: audio.startTime,
+        volume: audio.volume
+      });
+
+      console.log(`[${jobId}] Processed audio ${index + 1}/${activeAudio.length}: start=${audio.startTime}s, duration=${audio.duration}s, volume=${audio.volume}`);
+    } catch (error) {
+      console.error(`[${jobId}] Failed to process audio ${audio.url}:`, error);
+      throw new Error(`Failed to process audio: ${audio.url}`);
+    }
+  }
+
+  return { audioPaths, hasAudio: audioPaths.length > 0 };
+}
+
+/**
+ * Final render with concatenation, overlays, and audio
  */
 async function finalRender(
   segmentPaths: string[],
@@ -282,6 +433,9 @@ async function finalRender(
   tempDir: string,
   jobId: string,
   format: string,
+  audioPaths: Array<{ path: string; startTime: number; volume: number }>,
+  hasAudio: boolean,
+  audioMixMode: 'mix' | 'replace',
   onProgress?: (progress: number, jobId: string) => void
 ): Promise<string> {
   // Create concat list
@@ -323,15 +477,114 @@ async function finalRender(
     }
   }
   
-  if (needsTranscode) {
+  // Add audio inputs
+  if (hasAudio && audioPaths.length > 0) {
+    for (const audio of audioPaths) {
+      concatArgs.push('-i', audio.path);
+    }
+  }
+
+  if (needsTranscode || hasAudio) {
+    const filterParts: string[] = [];
+    let videoStream = '[0:v]';
+    let audioStreams: string[] = [];
+    let nextStreamIndex = 1;
+    let needsVideoFilter = false;
+
     // Build overlay filters
     if (hasOverlays && overlays && overlays.length > 0) {
       const { filterComplex, outputStream } = buildOverlayFilters(overlays, imageOverlayPaths, totalDuration);
       if (filterComplex) {
-        concatArgs.push('-filter_complex', filterComplex);
-        concatArgs.push('-map', `[${outputStream}]`);
-        concatArgs.push('-map', '0:a?');
+        filterParts.push(filterComplex);
+        videoStream = `[${outputStream}]`;
+        nextStreamIndex = imageOverlayPaths.length + 1;
+        needsVideoFilter = true;
       }
+    }
+
+    // Handle audio mixing
+    if (hasAudio && audioPaths.length > 0) {
+      // Video audio is always from input 0 (the concat input)
+      const videoAudioStream = '[0:a]';
+      const audioInputStartIndex = hasOverlays && imageOverlayPaths.length > 0 
+        ? imageOverlayPaths.length + 1 
+        : 1;
+
+      if (audioMixMode === 'replace') {
+        // Replace video audio with mixed audio tracks
+        if (audioPaths.length === 1) {
+          // Single audio track - delay and use directly
+          const audio = audioPaths[0]!;
+          const delay = audio.startTime;
+          filterParts.push(
+            `[${audioInputStartIndex}:a]adelay=${Math.round(delay * 1000)}|${Math.round(delay * 1000)}[a0]`
+          );
+          audioStreams.push('[a0]');
+        } else {
+          // Multiple audio tracks - delay each and mix
+          audioPaths.forEach((audio, index) => {
+            const delay = audio.startTime;
+            filterParts.push(
+              `[${audioInputStartIndex + index}:a]adelay=${Math.round(delay * 1000)}|${Math.round(delay * 1000)}[a${index}]`
+            );
+            audioStreams.push(`[a${index}]`);
+          });
+          
+          // Mix all audio tracks
+          if (audioStreams.length > 1) {
+            const mixInputs = audioStreams.join('');
+            filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=longest[amixed]`);
+            audioStreams = ['[amixed]'];
+          }
+        }
+      } else {
+        // Mix mode - combine video audio with additional audio tracks
+        // Add delayed audio tracks first
+        audioPaths.forEach((audio, index) => {
+          const delay = audio.startTime;
+          filterParts.push(
+            `[${audioInputStartIndex + index}:a]adelay=${Math.round(delay * 1000)}|${Math.round(delay * 1000)}[a${index}]`
+          );
+          audioStreams.push(`[a${index}]`);
+        });
+        
+        // Add video audio to the mix
+        audioStreams.push(videoAudioStream);
+        
+        // Mix video audio with additional audio tracks
+        if (audioStreams.length > 1) {
+          const mixInputs = audioStreams.join('');
+          filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=longest[amixed]`);
+          audioStreams = ['[amixed]'];
+        } else {
+          // Only video audio
+          audioStreams = [videoAudioStream];
+        }
+      }
+    } else {
+      // No additional audio - use video audio if available
+      audioStreams.push('[0:a]');
+    }
+
+    // If we have audio filters but no video filter, we need to add a passthrough for video
+    if (filterParts.length > 0 && !needsVideoFilter) {
+      filterParts.unshift(`[0:v]null[vout]`);
+      videoStream = '[vout]';
+    }
+
+    // Build filter_complex
+    if (filterParts.length > 0) {
+      concatArgs.push('-filter_complex', filterParts.join(';'));
+      
+      // Map video and audio from filter outputs
+      concatArgs.push('-map', videoStream);
+      if (audioStreams.length > 0 && audioStreams[0]) {
+        concatArgs.push('-map', audioStreams[0]);
+      }
+    } else {
+      // No filters needed, map directly from inputs
+      concatArgs.push('-map', '0:v');
+      concatArgs.push('-map', '0:a?');
     }
     
     const hasMpdSource = sources.some(s => isMpdUrl(s.url));
@@ -339,6 +592,9 @@ async function finalRender(
     const finalCrf = hasMpdSource ? '18' : serverConfig.transcodeCrf;
     
     console.log(`[${jobId}] Final output quality: CRF ${finalCrf}, Preset ${finalPreset}${hasMpdSource ? ' (MPD detected)' : ''}`);
+    if (hasAudio) {
+      console.log(`[${jobId}] Audio mode: ${audioMixMode}, ${audioPaths.length} track(s)`);
+    }
     
     concatArgs.push(
       '-c:v', 'libx264',

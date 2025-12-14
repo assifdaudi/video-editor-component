@@ -145,3 +145,30 @@ export interface TimelineSelection {
   end: number;
 }
 
+/**
+ * Represents an audio source in the timeline
+ */
+export interface AudioSource {
+  id: number;
+  url: string;
+  startTime: number; // Start time in seconds on the timeline (adjusted for cuts)
+  duration: number; // Duration in seconds (may be shortened if extends beyond video)
+  originalDuration: number; // Original duration of the audio file before trimming
+  originalStartTime?: number; // Original start time in the timeline before any cuts (for recalculation)
+  audioTrimStart: number; // Start trim point within the audio file (0 = beginning)
+  audioTrimEnd: number; // End trim point within the audio file (originalDuration = end)
+  volume: number; // Volume level (0-1)
+  muted: boolean; // Whether this track is muted
+  solo: boolean; // Whether this track is solo (only this track plays)
+  order: number; // Display order
+}
+
+/**
+ * Audio timeline drag state
+ */
+export interface AudioTimelineDrag {
+  audioId: number;
+  startX: number;
+  startTime: number;
+}
+

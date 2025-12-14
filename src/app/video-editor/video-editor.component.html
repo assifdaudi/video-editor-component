@@ -432,6 +432,233 @@
     </section>
   }
 
+  @if (sourceLoaded() && duration() > 0) {
+    <section class="audio-timeline-shell">
+      <div class="timeline-meta">
+        <h2>Audio Timeline</h2>
+        <p>
+          Add audio tracks that will be mixed with or replace the video audio. 
+          Drag audio clips to reposition them on the timeline.
+        </p>
+        <div class="audio-controls-header">
+          <label class="audio-mix-mode">
+            <span>Audio Mode:</span>
+            <select [value]="audioMixMode()" (change)="setAudioMixMode($any($event.target).value)">
+              <option value="mix">Mix with video audio</option>
+              <option value="replace">Replace video audio</option>
+            </select>
+          </label>
+          <label class="master-volume-control">
+            <span>Master Volume:</span>
+            <input 
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.01" 
+              [value]="masterVolume()"
+              (input)="updateMasterVolume(+$any($event.target).value)"
+            />
+            <span>{{ Math.round(masterVolume() * 100) }}%</span>
+          </label>
+          <button type="button" (click)="openAudioForm()">Add Audio Track</button>
+        </div>
+      </div>
+      
+      @if (showAudioForm()) {
+        <div class="audio-form">
+          <h3>Add Audio Track</h3>
+          <div class="field-grid">
+            <label>
+              Audio URL
+              <input 
+                type="url" 
+                id="audioUrl" 
+                placeholder="https://example.com/audio.mp3"
+              />
+            </label>
+            <label>
+              Start Time (sec)
+              <input 
+                type="number" 
+                id="audioStart" 
+                step="0.1" 
+                [value]="currentTime()"
+                [min]="0"
+                [max]="duration()"
+              />
+            </label>
+            <label>
+              Volume (0-1)
+              <input 
+                type="number" 
+                id="audioVolume" 
+                step="0.1" 
+                value="1"
+                min="0"
+                max="1"
+              />
+            </label>
+          </div>
+          <div class="hint">
+            <button type="button" (click)="closeAudioForm()">Cancel</button>
+            <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
+          </div>
+        </div>
+      }
+
+      <div
+        class="audio-timeline"
+        [style.height.px]="audioTimelineHeight()"
+        (pointermove)="onAudioTimelinePointerMove($event)"
+        (pointerup)="onAudioTimelinePointerUp($event)"
+      >
+        <div class="audio-timeline__rail"></div>
+        @for (audio of audioSources(); track audio.id) {
+          @let trackIndex = getAudioTrackIndex(audio);
+          <div
+            class="audio-timeline__clip"
+            [attr.data-audio-id]="audio.id"
+            [attr.data-track-index]="trackIndex"
+            [style.left.%]="getAudioClipLeft(audio)"
+            [style.width.%]="getAudioClipWidth(audio)"
+            [style.top.px]="6 + (trackIndex * 44)"
+            [style.height.px]="40"
+            [class.audio-timeline__clip--muted]="audio.muted"
+            [class.audio-timeline__clip--solo]="audio.solo"
+            (pointerdown)="onAudioTimelinePointerDown($event, audio)"
+            tabindex="0"
+            role="button"
+            [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'"
+          >
+            <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
+          </div>
+        }
+        <div class="audio-timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
+      </div>
+
+      @if (hasAudio()) {
+        <div class="audio-sources-list">
+          <h3>Audio Tracks ({{ audioSources().length }})</h3>
+          <ul class="audio-sources">
+            @for (audio of audioSources(); track audio.id) {
+              <li class="audio-source-item">
+                <div class="audio-source-item__info">
+                  <span class="audio-source-item__url" [title]="audio.url">
+                    {{ audio.url }}
+                  </span>
+                  <span class="audio-source-item__timeline">
+                    Timeline: {{ formatTime(audio.startTime) }} → {{ formatTime(audio.startTime + audio.duration) }}
+                  </span>
+                  @if (editingAudioId() === audio.id) {
+                    <div class="audio-source-item__trim-edit">
+                      <label>
+                        Trim Start (in audio file):
+                        <input 
+                          type="number" 
+                          #trimStartInput
+                          [value]="audio.audioTrimStart" 
+                          step="0.1" 
+                          [min]="0"
+                          [max]="audio.audioTrimEnd"
+                          (keydown.enter)="updateAudioTrim(audio.id, +trimStartInput.value, audio.audioTrimEnd)"
+                          (keydown.escape)="cancelEditingAudio()"
+                        />
+                      </label>
+                      <label>
+                        Trim End (in audio file):
+                        <input 
+                          type="number" 
+                          #trimEndInput
+                          [value]="audio.audioTrimEnd" 
+                          step="0.1" 
+                          [min]="audio.audioTrimStart"
+                          [max]="audio.originalDuration"
+                          (keydown.enter)="updateAudioTrim(audio.id, audio.audioTrimStart, +trimEndInput.value)"
+                          (keydown.escape)="cancelEditingAudio()"
+                        />
+                      </label>
+                      <div class="audio-trim-actions">
+                        <button 
+                          type="button" 
+                          class="ghost" 
+                          (click)="updateAudioTrim(audio.id, +trimStartInput.value, +trimEndInput.value)"
+                        >
+                          ✓ Apply
+                        </button>
+                        <button 
+                          type="button" 
+                          class="ghost" 
+                          (click)="cancelEditingAudio()"
+                        >
+                          ✕ Cancel
+                        </button>
+                      </div>
+                    </div>
+                  } @else {
+                    <small class="audio-source-item__trim-info">
+                      Audio: {{ formatTime(audio.audioTrimStart) }} → {{ formatTime(audio.audioTrimEnd) }} 
+                      (of {{ formatTime(audio.originalDuration) }})
+                    </small>
+                  }
+                </div>
+                <div class="audio-source-item__controls">
+                  <button 
+                    type="button" 
+                    class="ghost"
+                    (click)="startEditingAudio(audio.id)"
+                    [title]="'Edit trim points'"
+                  >
+                    ✂️ Trim
+                  </button>
+                  <label class="volume-control">
+                    <span>Vol:</span>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="1" 
+                      step="0.01" 
+                      [value]="audio.volume"
+                      (input)="updateAudioVolume(audio.id, +$any($event.target).value)"
+                    />
+                    <span>{{ Math.round(audio.volume * 100) }}%</span>
+                  </label>
+                  <button 
+                    type="button" 
+                    class="ghost"
+                    [class.active]="audio.muted"
+                    (click)="toggleAudioMute(audio.id)"
+                    [title]="audio.muted ? 'Unmute' : 'Mute'"
+                  >
+                    {{ audio.muted ? '🔇' : '🔊' }}
+                  </button>
+                  <button 
+                    type="button" 
+                    class="ghost"
+                    [class.active]="audio.solo"
+                    (click)="toggleAudioSolo(audio.id)"
+                    [title]="audio.solo ? 'Disable Solo' : 'Solo'"
+                  >
+                    {{ audio.solo ? '⭐' : '☆' }}
+                  </button>
+                  <button 
+                    type="button" 
+                    class="ghost danger" 
+                    (click)="removeAudioSource(audio.id)"
+                    title="Remove"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            }
+          </ul>
+        </div>
+      } @else {
+        <p class="muted">No audio tracks added yet. Click "Add Audio Track" to add one.</p>
+      }
+    </section>
+  }
+
   @if (duration() > 0) {
     <section class="cuts-panel">
       <div class="cuts-panel__header">
