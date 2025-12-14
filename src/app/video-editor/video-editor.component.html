@@ -49,25 +49,14 @@
   <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="addSource()">
     <label>
       Source URL (Video or Image)
-      <input
-        formControlName="sourceUrl"
-        type="url"
-        placeholder="https://example.com/video.mp4 or image.jpg"
-        [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched"
-      />
+      <input formControlName="sourceUrl" type="url" placeholder="https://example.com/video.mp4 or image.jpg"
+        [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched" />
     </label>
     @if (isImageUrl()) {
-      <label class="image-duration-field">
-        Image Duration (seconds)
-        <input
-          formControlName="imageDuration"
-          type="number"
-          step="0.5"
-          min="0.1"
-          max="60"
-          placeholder="5"
-        />
-      </label>
+    <label class="image-duration-field">
+      Image Duration (seconds)
+      <input formControlName="imageDuration" type="number" step="0.5" min="0.1" max="60" placeholder="5" />
+    </label>
     }
     <button type="submit" [disabled]="sourceForm.invalid || loading()">
       {{ loading() ? 'Adding…' : 'Add to Timeline' }}
@@ -75,245 +64,174 @@
   </form>
 
   @if (sources().length > 0) {
-    <section class="sources-panel">
-      <div class="sources-panel__header">
-        <h2>
-          Sources ({{ sources().length }})
-          <span class="sources-panel__total-duration">Total: {{ formatTime(duration()) }}</span>
-        </h2>
-        <p class="sources-panel__hint">
-          Sources will be concatenated in the order shown. Reorder them using the arrows.
-        </p>
-      </div>
-      <ul class="sources-list">
-        @for (source of sources(); track source.id) {
-          <li class="source-item">
-            <div class="source-item__info">
-              <span class="source-item__type">
-                {{ source.type === 'video' ? '🎥' : '🖼️' }} {{ source.type }}
-                @if (editingSourceId() !== source.id) {
-                  <small class="source-item__duration">
-                    {{ formatTime(source.duration) }}
-                    @if (source.type === 'image') {
-                      <button 
-                        type="button" 
-                        class="edit-duration-btn"
-                        (click)="startEditingSource(source.id)"
-                        title="Edit duration"
-                      >
-                        ✏️
-                      </button>
-                    }
-                  </small>
-                }
-                @if (editingSourceId() === source.id) {
-                  <span class="source-item__duration-edit">
-                    <input 
-                      type="number" 
-                      #durationInput
-                      [value]="source.duration" 
-                      step="0.5" 
-                      min="0.1" 
-                      max="60"
-                      (keydown.enter)="updateSourceDuration(source.id, +durationInput.value)"
-                      (keydown.escape)="cancelEditingSource()"
-                    />
-                    <button 
-                      type="button" 
-                      class="ghost" 
-                      (click)="updateSourceDuration(source.id, +durationInput.value)"
-                    >
-                      ✓
-                    </button>
-                    <button 
-                      type="button" 
-                      class="ghost" 
-                      (click)="cancelEditingSource()"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                }
-              </span>
-              <span class="source-item__url" [title]="source.url">
-                {{ source.url }}
-              </span>
-              <span class="source-item__timeline">
-                {{ formatTime(source.startTime) }} → {{ formatTime(source.startTime + source.duration) }}
-              </span>
-            </div>
-            <div class="source-item__actions">
-              <button 
-                type="button" 
-                class="ghost" 
-                (click)="moveSourceUp(source.id)"
-                [disabled]="source.order === 0"
-                title="Move up"
-              >
-                ↑
+  <section class="sources-panel">
+    <div class="sources-panel__header">
+      <h2>
+        Sources ({{ sources().length }})
+        <span class="sources-panel__total-duration">Total: {{ formatTime(duration()) }}</span>
+      </h2>
+      <p class="sources-panel__hint">
+        Sources will be concatenated in the order shown. Reorder them using the arrows.
+      </p>
+    </div>
+    <ul class="sources-list">
+      @for (source of sources(); track source.id) {
+      <li class="source-item">
+        <div class="source-item__info">
+          <span class="source-item__type">
+            {{ source.type === 'video' ? '🎥' : '🖼️' }} {{ source.type }}
+            @if (editingSourceId() !== source.id) {
+            <small class="source-item__duration">
+              {{ formatTime(source.duration) }}
+              @if (source.type === 'image') {
+              <button type="button" class="edit-duration-btn" (click)="startEditingSource(source.id)"
+                title="Edit duration">
+                ✏️
               </button>
-              <button 
-                type="button" 
-                class="ghost" 
-                (click)="moveSourceDown(source.id)"
-                [disabled]="source.order === sources().length - 1"
-                title="Move down"
-              >
-                ↓
+              }
+            </small>
+            }
+            @if (editingSourceId() === source.id) {
+            <span class="source-item__duration-edit">
+              <input type="number" #durationInput [value]="source.duration" step="0.5" min="0.1" max="60"
+                (keydown.enter)="updateSourceDuration(source.id, +durationInput.value)"
+                (keydown.escape)="cancelEditingSource()" />
+              <button type="button" class="ghost" (click)="updateSourceDuration(source.id, +durationInput.value)">
+                ✓
               </button>
-              <button 
-                type="button" 
-                class="ghost danger" 
-                (click)="removeSource(source.id)"
-                title="Remove"
-              >
-                Remove
+              <button type="button" class="ghost" (click)="cancelEditingSource()">
+                ✕
               </button>
-            </div>
-          </li>
-        }
-      </ul>
-    </section>
+            </span>
+            }
+          </span>
+          <span class="source-item__url" [title]="source.url">
+            {{ source.url }}
+          </span>
+          <span class="source-item__timeline">
+            {{ formatTime(source.startTime) }} → {{ formatTime(source.startTime + source.duration) }}
+          </span>
+        </div>
+        <div class="source-item__actions">
+          <button type="button" class="ghost" (click)="moveSourceUp(source.id)" [disabled]="source.order === 0"
+            title="Move up">
+            ↑
+          </button>
+          <button type="button" class="ghost" (click)="moveSourceDown(source.id)"
+            [disabled]="source.order === sources().length - 1" title="Move down">
+            ↓
+          </button>
+          <button type="button" class="ghost danger" (click)="removeSource(source.id)" title="Remove">
+            Remove
+          </button>
+        </div>
+      </li>
+      }
+    </ul>
+  </section>
   }
 
   @if (errorMessage()) {
-    <p class="error">{{ errorMessage() }}</p>
+  <p class="error">{{ errorMessage() }}</p>
   }
 
   <section class="player" [class.player--idle]="!sourceLoaded()">
     @if (!sourceLoaded()) {
-      <div class="player__placeholder">
-        Add video/image sources above to begin editing.
-      </div>
+    <div class="player__placeholder">
+      Add video/image sources above to begin editing.
+    </div>
     }
     @if (sourceLoaded() && sources().length > 1) {
-      <div class="player__source-indicator">
-        <button
-          type="button"
-          class="source-nav-btn source-nav-btn--prev"
-          [disabled]="!canGoToPreviousSource()"
-          (click)="goToPreviousSource()"
-          title="Previous source (←)"
-        >
-          ←
-        </button>
-        <span class="source-indicator-text">
-          <span class="source-indicator-label">
-            {{ getCurrentSource()?.type === 'image' ? '🖼️' : '🎥' }}
-            Source {{ currentSourceIndex() + 1 }} / {{ sources().length }}
-          </span>
-          <small class="source-indicator-hint">Use ← → keys</small>
+    <div class="player__source-indicator">
+      <button type="button" class="source-nav-btn source-nav-btn--prev" [disabled]="!canGoToPreviousSource()"
+        (click)="goToPreviousSource()" title="Previous source (←)">
+        ←
+      </button>
+      <span class="source-indicator-text">
+        <span class="source-indicator-label">
+          {{ getCurrentSource()?.type === 'image' ? '🖼️' : '🎥' }}
+          Source {{ currentSourceIndex() + 1 }} / {{ sources().length }}
         </span>
-        <button
-          type="button"
-          class="source-nav-btn source-nav-btn--next"
-          [disabled]="!canGoToNextSource()"
-          (click)="goToNextSource()"
-          title="Next source (→)"
-        >
-          →
-        </button>
-      </div>
+        <small class="source-indicator-hint">Use ← → keys</small>
+      </span>
+      <button type="button" class="source-nav-btn source-nav-btn--next" [disabled]="!canGoToNextSource()"
+        (click)="goToNextSource()" title="Next source (→)">
+        →
+      </button>
+    </div>
     }
     @if (sourceLoaded() && getCurrentSource()?.type === 'image') {
-      <div class="player__image-indicator">
-        <span>📷 Image Preview - {{ formatTime(getCurrentSource()?.duration || 0) }}</span>
-      </div>
+    <div class="player__image-indicator">
+      <span>📷 Image Preview - {{ formatTime(getCurrentSource()?.duration || 0) }}</span>
+    </div>
     }
-    <div 
-      class="player__container" 
-      #playerContainer
+    <div class="player__container" #playerContainer
       (pointermove)="resizingOverlay() ? resizeOverlay($event) : (draggingOverlay() ? dragOverlay($event) : null)"
-      (pointerup)="stopDragOverlay(); stopResizeOverlay()"
-    >
-      <video
-        #videoEl
-        [attr.controls]="sourceLoaded() ? '' : null"
-        playsinline
-        (loadedmetadata)="onMetadataLoaded()"
-        (timeupdate)="onTimeUpdate()"
-        (ended)="onVideoEnded()"
-        (error)="onVideoError()"
-      ></video>
-      
+      (pointerup)="stopDragOverlay(); stopResizeOverlay()">
+      <video #videoEl [attr.controls]="sourceLoaded() ? '' : null" playsinline (loadedmetadata)="onMetadataLoaded()"
+        (timeupdate)="onTimeUpdate()" (ended)="onVideoEnded()" (error)="onVideoError()"></video>
+
       <!-- Image preview for image sources -->
       @if (sourceLoaded() && getCurrentSource()?.type === 'image') {
-        <img 
-          [src]="getCurrentSource()?.url"
-          class="player__image-preview"
-          alt="Image source preview"
-        />
+      <img [src]="getCurrentSource()?.url" class="player__image-preview" alt="Image source preview" />
       }
-      
-      
+
+
       <!-- Overlay previews -->
       @for (overlay of getActiveOverlays(); track overlay.id) {
-        <div
-          class="overlay-preview"
-          [class.overlay-preview--text]="overlay.type === 'text'"
-          [class.overlay-preview--image]="overlay.type === 'image'"
-          [class.overlay-preview--shape]="overlay.type === 'shape'"
-          [class.overlay-preview--shape-rectangle]="overlay.type === 'shape'"
-          [class.overlay-preview--dragging]="draggingOverlay()?.overlay?.id === overlay.id"
-          [class.overlay-preview--resizing]="resizingOverlay()?.overlay?.id === overlay.id"
-          [style.left.%]="getOverlayLeftInContainer(overlay)"
-          [style.top.%]="getOverlayTopInContainer(overlay)"
-          [style.font-size.px]="overlay.type === 'text' ? getTextOverlayFontSize(overlay) : null"
-          [style.color]="overlay.type === 'text' ? getTextOverlayFontColor(overlay) : null"
-          [style.background-color]="overlay.type === 'shape' && getShapeOverlayFill(overlay) ? getShapeOverlayColor(overlay) : null"
-          [style.opacity]="overlay.opacity ?? 1"
-          [style.width.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayWidthInContainer(overlay) : null"
-          [style.height.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayHeightInContainer(overlay) : null"
-          [style.border]="overlay.type === 'shape' && !getShapeOverlayFill(overlay) ? (getShapeOverlayStrokeWidth(overlay) + 'px solid ' + getShapeOverlayColor(overlay)) : null"
-          [style.box-sizing]="overlay.type === 'shape' ? 'border-box' : null"
-          (pointerdown)="startDragOverlay(overlay, $event)"
-        >
-          @if (overlay.type === 'text') {
-            <span 
-              [style.background-color]="overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? getTextOverlayBgColor(overlay) : null"
-              [style.padding]="overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? '5px' : '0'"
-            >{{ getOverlayText(overlay) }}</span>
-          }
-          @if (overlay.type === 'image') {
-            <img [src]="getOverlayImageUrl(overlay)" alt="Overlay" />
-          }
-          <!-- Resize handles for text, images and shapes -->
-          <!-- Resize handles for images and shapes (all 4 corners) -->
-          @if (overlay.type === 'image' || overlay.type === 'shape') {
-            <div class="overlay-preview__resize-handles">
-              <div
-                class="overlay-preview__resize-handle overlay-preview__resize-handle--nw"
-                (pointerdown)="startResizeOverlay(overlay, $event, 'nw'); $event.stopPropagation()"
-              ></div>
-              <div
-                class="overlay-preview__resize-handle overlay-preview__resize-handle--ne"
-                (pointerdown)="startResizeOverlay(overlay, $event, 'ne'); $event.stopPropagation()"
-              ></div>
-              <div
-                class="overlay-preview__resize-handle overlay-preview__resize-handle--sw"
-                (pointerdown)="startResizeOverlay(overlay, $event, 'sw'); $event.stopPropagation()"
-              ></div>
-              <div
-                class="overlay-preview__resize-handle overlay-preview__resize-handle--se"
-                (pointerdown)="startResizeOverlay(overlay, $event, 'se'); $event.stopPropagation()"
-              ></div>
-            </div>
-          }
-          <!-- Resize handle for text (only bottom-right corner) -->
-          @if (overlay.type === 'text') {
-            <div class="overlay-preview__resize-handles">
-              <div
-                class="overlay-preview__resize-handle overlay-preview__resize-handle--se"
-                (pointerdown)="startResizeOverlay(overlay, $event, 'se'); $event.stopPropagation()"
-              ></div>
-            </div>
-          }
+      <div class="overlay-preview" [class.overlay-preview--text]="overlay.type === 'text'"
+        [class.overlay-preview--image]="overlay.type === 'image'"
+        [class.overlay-preview--shape]="overlay.type === 'shape'"
+        [class.overlay-preview--shape-rectangle]="overlay.type === 'shape'"
+        [class.overlay-preview--dragging]="draggingOverlay()?.overlay?.id === overlay.id"
+        [class.overlay-preview--resizing]="resizingOverlay()?.overlay?.id === overlay.id"
+        [style.left.%]="getOverlayLeftInContainer(overlay)" [style.top.%]="getOverlayTopInContainer(overlay)"
+        [style.font-size.px]="overlay.type === 'text' ? getTextOverlayFontSize(overlay) : null"
+        [style.color]="overlay.type === 'text' ? getTextOverlayFontColor(overlay) : null"
+        [style.background-color]="overlay.type === 'shape' && getShapeOverlayFill(overlay) ? getShapeOverlayColor(overlay) : null"
+        [style.opacity]="overlay.opacity ?? 1"
+        [style.width.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayWidthInContainer(overlay) : null"
+        [style.height.%]="overlay.type === 'image' || overlay.type === 'shape' ? getOverlayHeightInContainer(overlay) : null"
+        [style.border]="overlay.type === 'shape' && !getShapeOverlayFill(overlay) ? (getShapeOverlayStrokeWidth(overlay) + 'px solid ' + getShapeOverlayColor(overlay)) : null"
+        [style.box-sizing]="overlay.type === 'shape' ? 'border-box' : null"
+        (pointerdown)="startDragOverlay(overlay, $event)">
+        @if (overlay.type === 'text') {
+        <span
+          [style.background-color]="overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? getTextOverlayBgColor(overlay) : null"
+          [style.padding]="overlay.type === 'text' && getTextOverlayBgColor(overlay) !== 'transparent' ? '5px' : '0'">{{
+          getOverlayText(overlay) }}</span>
+        }
+        @if (overlay.type === 'image') {
+        <img [src]="getOverlayImageUrl(overlay)" alt="Overlay" />
+        }
+        <!-- Resize handles for text, images and shapes -->
+        <!-- Resize handles for images and shapes (all 4 corners) -->
+        @if (overlay.type === 'image' || overlay.type === 'shape') {
+        <div class="overlay-preview__resize-handles">
+          <div class="overlay-preview__resize-handle overlay-preview__resize-handle--nw"
+            (pointerdown)="startResizeOverlay(overlay, $event, 'nw'); $event.stopPropagation()"></div>
+          <div class="overlay-preview__resize-handle overlay-preview__resize-handle--ne"
+            (pointerdown)="startResizeOverlay(overlay, $event, 'ne'); $event.stopPropagation()"></div>
+          <div class="overlay-preview__resize-handle overlay-preview__resize-handle--sw"
+            (pointerdown)="startResizeOverlay(overlay, $event, 'sw'); $event.stopPropagation()"></div>
+          <div class="overlay-preview__resize-handle overlay-preview__resize-handle--se"
+            (pointerdown)="startResizeOverlay(overlay, $event, 'se'); $event.stopPropagation()"></div>
         </div>
+        }
+        <!-- Resize handle for text (only bottom-right corner) -->
+        @if (overlay.type === 'text') {
+        <div class="overlay-preview__resize-handles">
+          <div class="overlay-preview__resize-handle overlay-preview__resize-handle--se"
+            (pointerdown)="startResizeOverlay(overlay, $event, 'se'); $event.stopPropagation()"></div>
+        </div>
+        }
+      </div>
       }
     </div>
 
     <div class="player-controls" [class.disabled]="!sourceLoaded() || getCurrentSource()?.type === 'image'">
-      <button type="button" (click)="togglePlayPause()" [disabled]="!sourceLoaded() || getCurrentSource()?.type === 'image'">
+      <button type="button" (click)="togglePlayPause()"
+        [disabled]="!sourceLoaded() || getCurrentSource()?.type === 'image'">
         Play / Pause
       </button>
       <button type="button" (click)="jumpTo(trimStart())" [disabled]="!sourceLoaded()">
@@ -328,742 +246,570 @@
   </section>
 
   @if (sourceLoaded()) {
-    <section class="timeline-shell">
-      <div class="timeline-meta">
-        <h2>Timeline</h2>
-        <p>
-          Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a 
-          {{ timelineMode() === 'cut' ? 'cut' : 'segment' }} selection.
-        </p>
-      </div>
-      
-      <!-- Video Timeline -->
-      <div class="timeline-container">
-        <div class="timeline-label">Video Timeline</div>
-        <div
-          class="timeline"
-          (pointerdown)="onTimelinePointerDown($event)"
-          (pointermove)="onTimelinePointerMove($event)"
-          (pointerup)="onTimelinePointerUp($event)"
-          (pointerleave)="onTimelinePointerLeave()"
-        >
+  <!-- Unified Toolbar -->
+  @if (duration() > 0) {
+  <div class="editor-toolbar">
+    <button type="button" class="toolbar-btn mode-toggle" (click)="toggleTimelineMode()"
+      [title]="timelineMode() === 'cut' ? 'Switch to Keep Mode' : 'Switch to Cut Mode'">
+      {{ timelineMode() === 'cut' ? '✂️ Cut' : '✅ Keep' }}
+      <span class="toolbar-btn__label">{{ timelineMode() === 'cut' ? 'Mark to Remove' : 'Mark to Keep' }}</span>
+    </button>
+    <button type="button" class="toolbar-btn" (click)="openOverlayForm('text')">
+      ➕ Add Overlay
+    </button>
+    <button type="button" class="toolbar-btn" (click)="openAudioForm()">
+      🎵 Add Audio Track
+    </button>
+  </div>
+  }
+
+  <section class="timeline-shell">
+    <div class="timeline-meta">
+      <h2>Timeline</h2>
+      <p>
+        Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a
+        {{ timelineMode() === 'cut' ? 'cut' : 'segment' }} selection.
+      </p>
+    </div>
+
+    <!-- Video Timeline -->
+    <div class="timeline-container">
+      <div class="timeline-label">Video Timeline</div>
+      <div class="timeline" (pointerdown)="onTimelinePointerDown($event)" (pointermove)="onTimelinePointerMove($event)"
+        (pointerup)="onTimelinePointerUp($event)" (pointerleave)="onTimelinePointerLeave()">
         <div class="timeline__rail"></div>
         <!-- Source boundaries (when multiple sources are concatenated) -->
         @for (boundary of sourceBoundaries(); track boundary) {
-          <div
-            class="timeline__source-boundary"
-            [style.left.%]="percentFor(boundary)"
-            [title]="'Click to jump to ' + formatTime(boundary)"
-            tabindex="0"
-            role="button"
-            (click)="jumpToSourceByTime(boundary); $event.stopPropagation()"
-            (keydown.enter)="jumpToSourceByTime(boundary); $event.stopPropagation()"
-            (keydown.space)="jumpToSourceByTime(boundary); $event.stopPropagation(); $event.preventDefault()"
-          ></div>
+        <div class="timeline__source-boundary" [style.left.%]="percentFor(boundary)"
+          [title]="'Click to jump to ' + formatTime(boundary)" tabindex="0" role="button"
+          (click)="jumpToSourceByTime(boundary); $event.stopPropagation()"
+          (keydown.enter)="jumpToSourceByTime(boundary); $event.stopPropagation()"
+          (keydown.space)="jumpToSourceByTime(boundary); $event.stopPropagation(); $event.preventDefault()"></div>
         }
         <div class="timeline__shade timeline__shade--left" [style.width.%]="percentFor(trimStart())"></div>
-        <div
-          class="timeline__shade timeline__shade--right"
-          [style.width.%]="100 - percentFor(trimEnd())"
-        ></div>
+        <div class="timeline__shade timeline__shade--right" [style.width.%]="100 - percentFor(trimEnd())"></div>
         @if (timelineMode() === 'cut') {
-          @for (cut of cuts(); track trackCutBy($index, cut)) {
-            <div
-              class="timeline__cut"
-              [attr.data-cut-id]="cut.id"
-              [style.left.%]="percentFor(cut.start)"
-              [style.width.%]="percentSpan(cut.start, cut.end)"
-              tabindex="0"
-              role="button"
-              (click)="focusCut(cut, $event)"
-              (keydown.enter)="focusCut(cut, $event)"
-              (keydown.space)="focusCut(cut, $event); $event.preventDefault()"
-            ></div>
-          }
-          @if (hasCuts()) {
-            <div
-              class="timeline__cut timeline__cut--active"
-              [style.left.%]="percentFor(cutSelection().start)"
-              [style.width.%]="percentSpan(cutSelection().start, cutSelection().end)"
-            ></div>
-          }
+        @for (cut of cuts(); track trackCutBy($index, cut)) {
+        <div class="timeline__cut" [attr.data-cut-id]="cut.id" [style.left.%]="percentFor(cut.start)"
+          [style.width.%]="percentSpan(cut.start, cut.end)" tabindex="0" role="button" (click)="focusCut(cut, $event)"
+          (keydown.enter)="focusCut(cut, $event)" (keydown.space)="focusCut(cut, $event); $event.preventDefault()">
+        </div>
+        }
+        @if (hasCuts()) {
+        <div class="timeline__cut timeline__cut--active" [style.left.%]="percentFor(cutSelection().start)"
+          [style.width.%]="percentSpan(cutSelection().start, cutSelection().end)"></div>
+        }
         } @else {
-          @for (segment of segments(); track trackSegmentBy($index, segment)) {
-            <div
-              class="timeline__segment"
-              [attr.data-segment-id]="segment.id"
-              [style.left.%]="percentFor(segment.start)"
-              [style.width.%]="percentSpan(segment.start, segment.end)"
-              tabindex="0"
-              role="button"
-              (click)="focusSegment(segment, $event)"
-              (keydown.enter)="focusSegment(segment, $event)"
-              (keydown.space)="focusSegment(segment, $event); $event.preventDefault()"
-            ></div>
-          }
-          @if (hasSegments()) {
-            <div
-              class="timeline__segment timeline__segment--active"
-              [style.left.%]="percentFor(segmentSelection().start)"
-              [style.width.%]="percentSpan(segmentSelection().start, segmentSelection().end)"
-            ></div>
-          }
+        @for (segment of segments(); track trackSegmentBy($index, segment)) {
+        <div class="timeline__segment" [attr.data-segment-id]="segment.id" [style.left.%]="percentFor(segment.start)"
+          [style.width.%]="percentSpan(segment.start, segment.end)" tabindex="0" role="button"
+          (click)="focusSegment(segment, $event)" (keydown.enter)="focusSegment(segment, $event)"
+          (keydown.space)="focusSegment(segment, $event); $event.preventDefault()"></div>
+        }
+        @if (hasSegments()) {
+        <div class="timeline__segment timeline__segment--active" [style.left.%]="percentFor(segmentSelection().start)"
+          [style.width.%]="percentSpan(segmentSelection().start, segmentSelection().end)"></div>
+        }
         }
         @if (timelineSelection()) {
-          <div
-            class="timeline__cut timeline__cut--pending"
-            [style.left.%]="percentFor(timelineSelection()?.start || 0)"
-            [style.width.%]="percentSpan(timelineSelection()?.start || 0, timelineSelection()?.end || 0)"
-          ></div>
+        <div class="timeline__cut timeline__cut--pending" [style.left.%]="percentFor(timelineSelection()?.start || 0)"
+          [style.width.%]="percentSpan(timelineSelection()?.start || 0, timelineSelection()?.end || 0)"></div>
         }
         @for (overlay of overlays(); track overlay.id) {
-          <div
-            class="timeline__overlay"
-            [class.timeline__overlay--text]="overlay.type === 'text'"
-            [class.timeline__overlay--image]="overlay.type === 'image'"
-            [style.left.%]="percentFor(overlay.start)"
-            [style.width.%]="percentSpan(overlay.start, overlay.end)"
-            tabindex="0"
-            role="button"
-            (click)="focusOverlay(overlay, $event)"
-            (keydown.enter)="focusOverlay(overlay, $event)"
-            (keydown.space)="focusOverlay(overlay, $event); $event.preventDefault()"
-            [title]="getOverlayTitle(overlay)"
-          ></div>
+        <div class="timeline__overlay" [class.timeline__overlay--text]="overlay.type === 'text'"
+          [class.timeline__overlay--image]="overlay.type === 'image'" [style.left.%]="percentFor(overlay.start)"
+          [style.width.%]="percentSpan(overlay.start, overlay.end)" tabindex="0" role="button"
+          (click)="focusOverlay(overlay, $event)" (keydown.enter)="focusOverlay(overlay, $event)"
+          (keydown.space)="focusOverlay(overlay, $event); $event.preventDefault()" [title]="getOverlayTitle(overlay)">
+        </div>
         }
         <div class="timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
-        </div>
       </div>
+    </div>
 
-      <!-- Audio Timeline -->
-      @if (duration() > 0) {
-        <div class="timeline-container">
-          <div class="timeline-label">Audio Timeline</div>
-          <div
-            class="audio-timeline"
-            [style.height.px]="audioTimelineHeight()"
-            (pointermove)="onAudioTimelinePointerMove($event)"
-            (pointerup)="onAudioTimelinePointerUp($event)"
-          >
-            <div class="audio-timeline__rail"></div>
-            @for (audio of audioSources(); track audio.id) {
-              @let trackIndex = getAudioTrackIndex(audio);
-              <div
-                class="audio-timeline__clip"
-                [attr.data-audio-id]="audio.id"
-                [attr.data-track-index]="trackIndex"
-                [style.left.%]="getAudioClipLeft(audio)"
-                [style.width.%]="getAudioClipWidth(audio)"
-                [style.top.px]="6 + (trackIndex * 44)"
-                [style.height.px]="40"
-                [class.audio-timeline__clip--muted]="audio.muted"
-                [class.audio-timeline__clip--solo]="audio.solo"
-                (pointerdown)="onAudioTimelinePointerDown($event, audio)"
-                tabindex="0"
-                role="button"
-                [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'"
-              >
-                <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
-              </div>
-            }
-            <div class="audio-timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
-          </div>
+    <!-- Audio Timeline -->
+    @if (duration() > 0) {
+    <div class="timeline-container">
+      <div class="timeline-label">Audio Timeline</div>
+      <div class="audio-timeline" [style.height.px]="audioTimelineHeight()"
+        (pointermove)="onAudioTimelinePointerMove($event)" (pointerup)="onAudioTimelinePointerUp($event)">
+        <div class="audio-timeline__rail"></div>
+        @for (audio of audioSources(); track audio.id) {
+        @let trackIndex = getAudioTrackIndex(audio);
+        <div class="audio-timeline__clip" [attr.data-audio-id]="audio.id" [attr.data-track-index]="trackIndex"
+          [style.left.%]="getAudioClipLeft(audio)" [style.width.%]="getAudioClipWidth(audio)"
+          [style.top.px]="6 + (trackIndex * 44)" [style.height.px]="40"
+          [class.audio-timeline__clip--muted]="audio.muted" [class.audio-timeline__clip--solo]="audio.solo"
+          (pointerdown)="onAudioTimelinePointerDown($event, audio)" tabindex="0" role="button"
+          [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'">
+          <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
         </div>
-      }
-
-      <!-- Audio Controls (below both timelines) -->
-      @if (duration() > 0) {
-        <div class="audio-controls-header">
-          <label class="audio-mix-mode">
-            <span>Audio Mode:</span>
-            <select [value]="audioMixMode()" (change)="setAudioMixMode($any($event.target).value)">
-              <option value="mix">Mix with video audio</option>
-              <option value="replace">Replace video audio</option>
-            </select>
-          </label>
-          <label class="master-volume-control">
-            <span>Master Volume:</span>
-            <input 
-              type="range" 
-              min="0" 
-              max="1" 
-              step="0.01" 
-              [value]="masterVolume()"
-              (input)="updateMasterVolume(+$any($event.target).value)"
-            />
-            <span>{{ Math.round(masterVolume() * 100) }}%</span>
-          </label>
-          <button type="button" (click)="openAudioForm()">Add Audio Track</button>
-        </div>
-
-        @if (showAudioForm()) {
-        <div class="audio-form">
-          <h3>Add Audio Track</h3>
-          <div class="field-grid">
-            <label>
-              Audio URL
-              <input 
-                type="url" 
-                id="audioUrl" 
-                placeholder="https://example.com/audio.mp3"
-              />
-            </label>
-            <label>
-              Start Time (sec)
-              <input 
-                type="number" 
-                id="audioStart" 
-                step="0.1" 
-                [value]="currentTime()"
-                [min]="0"
-                [max]="duration()"
-              />
-            </label>
-            <label>
-              Volume (0-1)
-              <input 
-                type="number" 
-                id="audioVolume" 
-                step="0.1" 
-                value="1"
-                min="0"
-                max="1"
-              />
-            </label>
-          </div>
-          <div class="hint">
-            <button type="button" (click)="closeAudioForm()">Cancel</button>
-            <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
-          </div>
-        </div>
-      }
-
-        @if (hasAudio()) {
-          <div class="audio-sources-list">
-          <h3>Audio Tracks ({{ audioSources().length }})</h3>
-          <ul class="audio-sources">
-            @for (audio of audioSources(); track audio.id) {
-              <li class="audio-source-item">
-                <div class="audio-source-item__info">
-                  <span class="audio-source-item__url" [title]="audio.url">
-                    {{ audio.url }}
-                  </span>
-                  <span class="audio-source-item__timeline">
-                    Timeline: {{ formatTime(audio.startTime) }} → {{ formatTime(audio.startTime + audio.duration) }}
-                  </span>
-                  @if (editingAudioId() === audio.id) {
-                    <div class="audio-source-item__trim-edit">
-                      <label>
-                        Trim Start (in audio file):
-                        <input 
-                          type="number" 
-                          #trimStartInput
-                          [value]="audio.audioTrimStart" 
-                          step="0.1" 
-                          [min]="0"
-                          [max]="audio.audioTrimEnd"
-                          (keydown.enter)="updateAudioTrim(audio.id, +trimStartInput.value, audio.audioTrimEnd)"
-                          (keydown.escape)="cancelEditingAudio()"
-                        />
-                      </label>
-                      <label>
-                        Trim End (in audio file):
-                        <input 
-                          type="number" 
-                          #trimEndInput
-                          [value]="audio.audioTrimEnd" 
-                          step="0.1" 
-                          [min]="audio.audioTrimStart"
-                          [max]="audio.originalDuration"
-                          (keydown.enter)="updateAudioTrim(audio.id, audio.audioTrimStart, +trimEndInput.value)"
-                          (keydown.escape)="cancelEditingAudio()"
-                        />
-                      </label>
-                      <div class="audio-trim-actions">
-                        <button 
-                          type="button" 
-                          class="ghost" 
-                          (click)="updateAudioTrim(audio.id, +trimStartInput.value, +trimEndInput.value)"
-                        >
-                          ✓ Apply
-                        </button>
-                        <button 
-                          type="button" 
-                          class="ghost" 
-                          (click)="cancelEditingAudio()"
-                        >
-                          ✕ Cancel
-                        </button>
-                      </div>
-                    </div>
-                  } @else {
-                    <small class="audio-source-item__trim-info">
-                      Audio: {{ formatTime(audio.audioTrimStart) }} → {{ formatTime(audio.audioTrimEnd) }} 
-                      (of {{ formatTime(audio.originalDuration) }})
-                    </small>
-                  }
-                </div>
-                <div class="audio-source-item__controls">
-                  <button 
-                    type="button" 
-                    class="ghost"
-                    (click)="startEditingAudio(audio.id)"
-                    [title]="'Edit trim points'"
-                  >
-                    ✂️ Trim
-                  </button>
-                  <label class="volume-control">
-                    <span>Vol:</span>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.01" 
-                      [value]="audio.volume"
-                      (input)="updateAudioVolume(audio.id, +$any($event.target).value)"
-                    />
-                    <span>{{ Math.round(audio.volume * 100) }}%</span>
-                  </label>
-                  <button 
-                    type="button" 
-                    class="ghost"
-                    [class.active]="audio.muted"
-                    (click)="toggleAudioMute(audio.id)"
-                    [title]="audio.muted ? 'Unmute' : 'Mute'"
-                  >
-                    {{ audio.muted ? '🔇' : '🔊' }}
-                  </button>
-                  <button 
-                    type="button" 
-                    class="ghost"
-                    [class.active]="audio.solo"
-                    (click)="toggleAudioSolo(audio.id)"
-                    [title]="audio.solo ? 'Disable Solo' : 'Solo'"
-                  >
-                    {{ audio.solo ? '⭐' : '☆' }}
-                  </button>
-                  <button 
-                    type="button" 
-                    class="ghost danger" 
-                    (click)="removeAudioSource(audio.id)"
-                    title="Remove"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </li>
-            }
-          </ul>
-          </div>
-        } @else {
-          <p class="muted">No audio tracks added yet. Click "Add Audio Track" to add one.</p>
         }
-      }
-    </section>
+        <div class="audio-timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
+      </div>
+    </div>
+    }
+
+    <!-- Audio Controls (below both timelines) -->
+    @if (duration() > 0) {
+    <div class="audio-controls-header">
+      <label class="audio-mix-mode">
+        <span>Audio Mode:</span>
+        <select [value]="audioMixMode()" (change)="setAudioMixMode($any($event.target).value)">
+          <option value="mix">Mix with video audio</option>
+          <option value="replace">Replace video audio</option>
+        </select>
+      </label>
+      <label class="master-volume-control">
+        <span>Master Volume:</span>
+        <input type="range" min="0" max="1" step="0.01" [value]="masterVolume()"
+          (input)="updateMasterVolume(+$any($event.target).value)" />
+        <span>{{ Math.round(masterVolume() * 100) }}%</span>
+      </label>
+    </div>
+
+    @if (showAudioForm()) {
+    <div class="audio-form">
+      <h3>Add Audio Track</h3>
+      <div class="field-grid">
+        <label>
+          Audio URL
+          <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
+        </label>
+        <label>
+          Start Time (sec)
+          <input type="number" id="audioStart" step="0.1" [value]="currentTime()" [min]="0" [max]="duration()" />
+        </label>
+        <label>
+          Volume (0-1)
+          <input type="number" id="audioVolume" step="0.1" value="1" min="0" max="1" />
+        </label>
+      </div>
+      <div class="hint">
+        <button type="button" (click)="closeAudioForm()">Cancel</button>
+        <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
+      </div>
+    </div>
+    }
+
+    @if (hasAudio()) {
+    <div class="audio-sources-list">
+      <h3>Audio Tracks ({{ audioSources().length }})</h3>
+      <ul class="audio-sources">
+        @for (audio of audioSources(); track audio.id) {
+        <li class="audio-source-item">
+          <div class="audio-source-item__info">
+            <span class="audio-source-item__url" [title]="audio.url">
+              {{ audio.url }}
+            </span>
+            <span class="audio-source-item__timeline">
+              Timeline: {{ formatTime(audio.startTime) }} → {{ formatTime(audio.startTime + audio.duration) }}
+            </span>
+            @if (editingAudioId() === audio.id) {
+            <div class="audio-source-item__trim-edit">
+              <label>
+                Trim Start (in audio file):
+                <input type="number" #trimStartInput [value]="audio.audioTrimStart" step="0.1" [min]="0"
+                  [max]="audio.audioTrimEnd"
+                  (keydown.enter)="updateAudioTrim(audio.id, +trimStartInput.value, audio.audioTrimEnd)"
+                  (keydown.escape)="cancelEditingAudio()" />
+              </label>
+              <label>
+                Trim End (in audio file):
+                <input type="number" #trimEndInput [value]="audio.audioTrimEnd" step="0.1" [min]="audio.audioTrimStart"
+                  [max]="audio.originalDuration"
+                  (keydown.enter)="updateAudioTrim(audio.id, audio.audioTrimStart, +trimEndInput.value)"
+                  (keydown.escape)="cancelEditingAudio()" />
+              </label>
+              <div class="audio-trim-actions">
+                <button type="button" class="ghost"
+                  (click)="updateAudioTrim(audio.id, +trimStartInput.value, +trimEndInput.value)">
+                  ✓ Apply
+                </button>
+                <button type="button" class="ghost" (click)="cancelEditingAudio()">
+                  ✕ Cancel
+                </button>
+              </div>
+            </div>
+            } @else {
+            <small class="audio-source-item__trim-info">
+              Audio: {{ formatTime(audio.audioTrimStart) }} → {{ formatTime(audio.audioTrimEnd) }}
+              (of {{ formatTime(audio.originalDuration) }})
+            </small>
+            }
+          </div>
+          <div class="audio-source-item__controls">
+            <button type="button" class="ghost" (click)="startEditingAudio(audio.id)" [title]="'Edit trim points'">
+              ✂️ Trim
+            </button>
+            <label class="volume-control">
+              <span>Vol:</span>
+              <input type="range" min="0" max="1" step="0.01" [value]="audio.volume"
+                (input)="updateAudioVolume(audio.id, +$any($event.target).value)" />
+              <span>{{ Math.round(audio.volume * 100) }}%</span>
+            </label>
+            <button type="button" class="ghost" [class.active]="audio.muted" (click)="toggleAudioMute(audio.id)"
+              [title]="audio.muted ? 'Unmute' : 'Mute'">
+              {{ audio.muted ? '🔇' : '🔊' }}
+            </button>
+            <button type="button" class="ghost" [class.active]="audio.solo" (click)="toggleAudioSolo(audio.id)"
+              [title]="audio.solo ? 'Disable Solo' : 'Solo'">
+              {{ audio.solo ? '⭐' : '☆' }}
+            </button>
+            <button type="button" class="ghost danger" (click)="removeAudioSource(audio.id)" title="Remove">
+              Remove
+            </button>
+          </div>
+        </li>
+        }
+      </ul>
+    </div>
+    } @else {
+    <p class="muted">No audio tracks added yet. Click "Add Audio Track" to add one.</p>
+    }
+    }
+  </section>
   }
 
   @if (duration() > 0) {
-    <section class="cuts-panel">
-      <div class="cuts-panel__header">
-        <h2>{{ timelineMode() === 'cut' ? 'Cut Mode' : 'Keep Mode' }}</h2>
-        <button 
-          type="button" 
-          class="mode-toggle"
-          (click)="toggleTimelineMode()"
-          [title]="timelineMode() === 'cut' ? 'Switch to Keep Mode' : 'Switch to Cut Mode'"
-        >
-          {{ timelineMode() === 'cut' ? '✂️ Cut' : '✅ Keep' }}
-          <span class="mode-toggle__label">{{ timelineMode() === 'cut' ? 'Mark to Remove' : 'Mark to Keep' }}</span>
+  <section class="cuts-panel">
+    <div class="cuts-panel__header">
+      <h2>{{ timelineMode() === 'cut' ? 'Cut Mode' : 'Keep Mode' }}</h2>
+    </div>
+
+    <div class="cuts-panel__form">
+      <h3>{{ timelineMode() === 'cut' ? 'Manual cut entry' : 'Manual segment entry' }}</h3>
+      <p>{{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.'
+        }}</p>
+      <div class="field-grid">
+        <label>
+          Start (sec)
+          <input type="number" step="0.05" [min]="0" [max]="duration()"
+            [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
+            (input)="updateCutSelection('start', $event)" />
+        </label>
+        <label>
+          End (sec)
+          <input type="number" step="0.05" [min]="0" [max]="duration()"
+            [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
+            (input)="updateCutSelection('end', $event)" />
+        </label>
+      </div>
+      <div class="hint">
+        <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
+        <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
+        <button type="button" class="primary" (click)="addCut()">
+          {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
         </button>
       </div>
-      
-      <div class="cuts-panel__form">
-        <h3>{{ timelineMode() === 'cut' ? 'Manual cut entry' : 'Manual segment entry' }}</h3>
-        <p>{{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.' }}</p>
+    </div>
+
+  </section>
+  }
+
+
+  <!-- Overlay Form Modal -->
+  @if (showOverlayForm()) {
+  <div class="modal-overlay" (click)="closeOverlayForm()" (keydown.escape)="closeOverlayForm()" tabindex="0">
+    <div class="modal-content" (click)="$event.stopPropagation()" #overlayFormContainer>
+      <div class="overlay-form">
+        <div class="overlay-form__header">
+          <h3>Add Overlay</h3>
+          <!-- Overlay Type Selection -->
+          <div class="overlay-type-selector">
+            <button type="button" class="overlay-type-btn"
+              [class.overlay-type-btn--active]="overlayFormType() === 'text'" (click)="overlayFormType.set('text')">
+              📝 Text
+            </button>
+            <button type="button" class="overlay-type-btn"
+              [class.overlay-type-btn--active]="overlayFormType() === 'image'" (click)="overlayFormType.set('image')">
+              🖼️ Image
+            </button>
+            <button type="button" class="overlay-type-btn"
+              [class.overlay-type-btn--active]="overlayFormType() === 'shape'" (click)="overlayFormType.set('shape')">
+              🔷 Shape
+            </button>
+          </div>
+        </div>
+
+        @if (overlayFormType() === 'text') {
         <div class="field-grid">
           <label>
+            Text
+            <input type="text" id="textInput" placeholder="Enter text" />
+          </label>
+          <label>
             Start (sec)
-            <input
-              type="number"
-              step="0.05"
-              [min]="0"
-              [max]="duration()"
-              [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
-              (input)="updateCutSelection('start', $event)"
-            />
+            <input type="number" id="textStart" step="0.1" [value]="currentTime()" />
           </label>
           <label>
             End (sec)
-            <input
-              type="number"
-              step="0.05"
-              [min]="0"
-              [max]="duration()"
-              [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
-              (input)="updateCutSelection('end', $event)"
-            />
+            <input type="number" id="textEnd" step="0.1" [value]="currentTime() + 5" />
+          </label>
+          <label>
+            X Position (%)
+            <input type="number" id="textX" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <label>
+            Y Position (%)
+            <input type="number" id="textY" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <p class="hint-text">💡 Drag the text overlay to position it, use corner handles to resize font</p>
+          <label>
+            Font Size
+            <input type="number" id="textFontSize" step="1" min="12" max="200" value="24" />
+          </label>
+          <label>
+            Font Color
+            <input type="color" id="textFontColor" value="#FFFFFF" />
+          </label>
+          <label>
+            Background Color
+            <input type="color" id="textBgColor" value="#000000" />
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="checkbox" id="textBgTransparent" />
+            <span>Transparent background</span>
+          </label>
+          <label>
+            Opacity (0-1)
+            <input type="number" id="textOpacity" step="0.1" min="0" max="1" value="1" />
           </label>
         </div>
+        }
+
+        @if (overlayFormType() === 'image') {
+        <div class="field-grid">
+          <label>
+            Image URL
+            <input type="url" id="imageUrl" placeholder="https://example.com/image.png" />
+          </label>
+          <label>
+            Start (sec)
+            <input type="number" id="imageStart" step="0.1" [value]="currentTime()" />
+          </label>
+          <label>
+            End (sec)
+            <input type="number" id="imageEnd" step="0.1" [value]="currentTime() + 5" />
+          </label>
+          <label>
+            X Position (%)
+            <input type="number" id="imageX" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <label>
+            Y Position (%)
+            <input type="number" id="imageY" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <p class="hint-text">💡 Drag the image overlay on the video to position it</p>
+          <label>
+            Width (%)
+            <input type="number" id="imageWidth" step="1" min="1" max="100" value="20" />
+          </label>
+          <label>
+            Height (%)
+            <input type="number" id="imageHeight" step="1" min="1" max="100" value="20" />
+          </label>
+          <label>
+            Opacity (0-1)
+            <input type="number" id="imageOpacity" step="0.1" min="0" max="1" value="1" />
+          </label>
+        </div>
+        }
+
+        @if (overlayFormType() === 'shape') {
+        <div class="field-grid">
+          <p class="hint-text">🔲 Rectangle Shape</p>
+          <label>
+            Start (sec)
+            <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />
+          </label>
+          <label>
+            End (sec)
+            <input type="number" id="overlayEnd" step="0.1" [value]="currentTime() + 5" />
+          </label>
+          <label>
+            X Position (%)
+            <input type="number" id="overlayX" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <label>
+            Y Position (%)
+            <input type="number" id="overlayY" step="1" min="0" max="100" value="10" readonly />
+          </label>
+          <p class="hint-text">💡 Drag the shape overlay on the video to position it</p>
+          <label>
+            Width (%)
+            <input type="number" id="shapeWidth" step="1" min="1" max="100" value="20" />
+          </label>
+          <label>
+            Height (%)
+            <input type="number" id="shapeHeight" step="1" min="1" max="100" value="20" />
+          </label>
+          <label>
+            Color
+            <input type="color" id="shapeColor" value="#FF0000" />
+          </label>
+          <label>
+            Stroke Width
+            <input type="number" id="shapeStrokeWidth" step="1" min="1" max="20" value="3" />
+          </label>
+          <label>
+            <input type="checkbox" id="shapeFill" /> Fill shape
+          </label>
+          <label>
+            Opacity (0-1)
+            <input type="number" id="shapeOpacity" step="0.1" min="0" max="1" value="1" />
+          </label>
+        </div>
+        }
+
         <div class="hint">
-          <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
-          <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
-          <button type="button" class="primary" (click)="addCut()">
-            {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
-          </button>
-        </div>
-      </div>
-
-    </section>
-  }
-
-  @if (duration() > 0) {
-    <section class="overlays-panel">
-      <div class="overlays-panel__header">
-        <h2>Overlays</h2>
-        <div class="overlays-panel__actions">
-          <button type="button" (click)="openOverlayForm('text')">Add Overlay</button>
-        </div>
-      </div>
-
-      @if (showOverlayForm()) {
-        <div class="overlay-form" #overlayFormContainer>
-          <div class="overlay-form__header">
-            <h3>Add Overlay</h3>
-            <!-- Overlay Type Selection -->
-            <div class="overlay-type-selector">
-              <button 
-                type="button"
-                class="overlay-type-btn"
-                [class.overlay-type-btn--active]="overlayFormType() === 'text'"
-                (click)="overlayFormType.set('text')"
-              >
-                📝 Text
-              </button>
-              <button 
-                type="button"
-                class="overlay-type-btn"
-                [class.overlay-type-btn--active]="overlayFormType() === 'image'"
-                (click)="overlayFormType.set('image')"
-              >
-                🖼️ Image
-              </button>
-              <button 
-                type="button"
-                class="overlay-type-btn"
-                [class.overlay-type-btn--active]="overlayFormType() === 'shape'"
-                (click)="overlayFormType.set('shape')"
-              >
-                🔷 Shape
-              </button>
-            </div>
-          </div>
-          
+          <button type="button" (click)="closeOverlayForm()">Cancel</button>
           @if (overlayFormType() === 'text') {
-            <div class="field-grid">
-              <label>
-                Text
-                <input type="text" id="textInput" placeholder="Enter text" />
-              </label>
-              <label>
-                Start (sec)
-                <input type="number" id="textStart" step="0.1" [value]="currentTime()" />
-              </label>
-              <label>
-                End (sec)
-                <input type="number" id="textEnd" step="0.1" [value]="currentTime() + 5" />
-              </label>
-              <label>
-                X Position (%)
-                <input type="number" id="textX" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <label>
-                Y Position (%)
-                <input type="number" id="textY" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <p class="hint-text">💡 Drag the text overlay to position it, use corner handles to resize font</p>
-              <label>
-                Font Size
-                <input type="number" id="textFontSize" step="1" min="12" max="200" value="24" />
-              </label>
-              <label>
-                Font Color
-                <input type="color" id="textFontColor" value="#FFFFFF" />
-              </label>
-              <label>
-                Background Color
-                <input type="color" id="textBgColor" value="#000000" />
-              </label>
-              <label style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="textBgTransparent" />
-                <span>Transparent background</span>
-              </label>
-              <label>
-                Opacity (0-1)
-                <input type="number" id="textOpacity" step="0.1" min="0" max="1" value="1" />
-              </label>
-            </div>
+          <button type="button" class="primary" (click)="addTextOverlayFromForm()">
+            Add Text Overlay
+          </button>
           }
-
           @if (overlayFormType() === 'image') {
-            <div class="field-grid">
-              <label>
-                Image URL
-                <input type="url" id="imageUrl" placeholder="https://example.com/image.png" />
-              </label>
-              <label>
-                Start (sec)
-                <input type="number" id="imageStart" step="0.1" [value]="currentTime()" />
-              </label>
-              <label>
-                End (sec)
-                <input type="number" id="imageEnd" step="0.1" [value]="currentTime() + 5" />
-              </label>
-              <label>
-                X Position (%)
-                <input type="number" id="imageX" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <label>
-                Y Position (%)
-                <input type="number" id="imageY" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <p class="hint-text">💡 Drag the image overlay on the video to position it</p>
-              <label>
-                Width (%)
-                <input type="number" id="imageWidth" step="1" min="1" max="100" value="20" />
-              </label>
-              <label>
-                Height (%)
-                <input type="number" id="imageHeight" step="1" min="1" max="100" value="20" />
-              </label>
-              <label>
-                Opacity (0-1)
-                <input type="number" id="imageOpacity" step="0.1" min="0" max="1" value="1" />
-              </label>
-            </div>
+          <button type="button" class="primary" (click)="addImageOverlayFromForm()">
+            Add Image Overlay
+          </button>
           }
-
           @if (overlayFormType() === 'shape') {
-            <div class="field-grid">
-              <p class="hint-text">🔲 Rectangle Shape</p>
-              <label>
-                Start (sec)
-                <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />
-              </label>
-              <label>
-                End (sec)
-                <input type="number" id="overlayEnd" step="0.1" [value]="currentTime() + 5" />
-              </label>
-              <label>
-                X Position (%)
-                <input type="number" id="overlayX" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <label>
-                Y Position (%)
-                <input type="number" id="overlayY" step="1" min="0" max="100" value="10" readonly />
-              </label>
-              <p class="hint-text">💡 Drag the shape overlay on the video to position it</p>
-              <label>
-                Width (%)
-                <input type="number" id="shapeWidth" step="1" min="1" max="100" value="20" />
-              </label>
-              <label>
-                Height (%)
-                <input type="number" id="shapeHeight" step="1" min="1" max="100" value="20" />
-              </label>
-              <label>
-                Color
-                <input type="color" id="shapeColor" value="#FF0000" />
-              </label>
-              <label>
-                Stroke Width
-                <input type="number" id="shapeStrokeWidth" step="1" min="1" max="20" value="3" />
-              </label>
-              <label>
-                <input type="checkbox" id="shapeFill" /> Fill shape
-              </label>
-              <label>
-                Opacity (0-1)
-                <input type="number" id="shapeOpacity" step="0.1" min="0" max="1" value="1" />
-              </label>
+          <button type="button" class="primary" (click)="addShapeOverlayFromForm()">
+            Add Shape Overlay
+          </button>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+  }
+
+  @if (duration() > 0) {
+  <section class="summary">
+    <h2>Export Plan</h2>
+
+    <!-- Queues Section -->
+    <div class="queues-section">
+      <!-- Cuts/Segments Queue -->
+      <div class="queue-panel">
+        <h3>{{ timelineMode() === 'cut' ? 'Cut queue' : 'Segment queue' }}</h3>
+        @if (timelineMode() === 'cut') {
+        @if (hasCuts()) {
+        <ul class="cuts">
+          @for (cut of cuts(); track cut.id) {
+          <li>
+            <div class="cuts__times">
+              <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
+              <small>{{ formatTime(cut.end - cut.start) }}</small>
             </div>
+            <div class="cuts__actions">
+              <button type="button" (click)="jumpTo(cut.start)">Preview</button>
+              <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
+            </div>
+          </li>
           }
-
-          <div class="hint">
-            <button type="button" (click)="closeOverlayForm()">Cancel</button>
-            @if (overlayFormType() === 'text') {
-              <button
-                type="button"
-                class="primary"
-                (click)="addTextOverlayFromForm()"
-              >
-                Add Text Overlay
-              </button>
-            }
-            @if (overlayFormType() === 'image') {
-              <button
-                type="button"
-                class="primary"
-                (click)="addImageOverlayFromForm()"
-              >
-                Add Image Overlay
-              </button>
-            }
-            @if (overlayFormType() === 'shape') {
-              <button
-                type="button"
-                class="primary"
-                (click)="addShapeOverlayFromForm()"
-              >
-                Add Shape Overlay
-              </button>
-            }
-          </div>
-        </div>
-      }
-
-    </section>
-  }
-
-  @if (duration() > 0) {
-    <section class="summary">
-      <h2>Export Plan</h2>
-      
-      <!-- Queues Section -->
-      <div class="queues-section">
-        <!-- Cuts/Segments Queue -->
-        <div class="queue-panel">
-          <h3>{{ timelineMode() === 'cut' ? 'Cut queue' : 'Segment queue' }}</h3>
-          @if (timelineMode() === 'cut') {
-            @if (hasCuts()) {
-              <ul class="cuts">
-                @for (cut of cuts(); track cut.id) {
-                  <li>
-                    <div class="cuts__times">
-                      <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
-                      <small>{{ formatTime(cut.end - cut.start) }}</small>
-                    </div>
-                    <div class="cuts__actions">
-                      <button type="button" (click)="jumpTo(cut.start)">Preview</button>
-                      <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
-                    </div>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="muted">No cuts added yet.</p>
-            }
-          } @else {
-            @if (hasSegments()) {
-              <ul class="cuts">
-                @for (segment of segments(); track segment.id) {
-                  <li>
-                    <div class="cuts__times">
-                      <span>{{ formatTime(segment.start) }} – {{ formatTime(segment.end) }}</span>
-                      <small>{{ formatTime(segment.end - segment.start) }}</small>
-                    </div>
-                    <div class="cuts__actions">
-                      <button type="button" (click)="jumpTo(segment.start)">Preview</button>
-                      <button type="button" class="ghost" (click)="removeSegment(segment.id)">Remove</button>
-                    </div>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="muted">No segments added yet. Mark parts to keep in the final video.</p>
-            }
-          }
-        </div>
-
-        <!-- Overlays Queue -->
-        <div class="queue-panel">
-          <h3>Overlay Queue</h3>
-          @if (hasOverlays()) {
-            <ul class="overlays">
-              @for (overlay of overlays(); track overlay.id) {
-                <li>
-                  <div class="overlays__info">
-                    <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : overlay.type === 'image' ? '🖼️ Image' : '🔷 Shape' }}</span>
-                    <span class="overlays__times">
-                      {{ formatTime(overlay.start) }} – {{ formatTime(overlay.end) }}
-                    </span>
-                    @if (overlay.type === 'text') {
-                      <small>{{ getOverlayText(overlay) }}</small>
-                    }
-                    @if (overlay.type === 'image') {
-                      <small>{{ getOverlayImageUrl(overlay) }}</small>
-                    }
-                    @if (overlay.type === 'shape') {
-                      <small>{{ getOverlayTitle(overlay) }}</small>
-                    }
-                  </div>
-                  <div class="overlays__actions">
-                    <button type="button" (click)="focusOverlay(overlay)">Preview</button>
-                    <button type="button" class="ghost" (click)="removeOverlay(overlay.id)">Remove</button>
-                  </div>
-                </li>
-              }
-            </ul>
-          } @else {
-            <p class="muted">No overlays added yet.</p>
-          }
-        </div>
-      </div>
-
-      <p class="muted">
-        This is a UI prototype. Hook these staged edits into your encoding pipeline
-        (ffmpeg, MediaConvert, etc.) to produce the final asset.
-      </p>
-    </section>
-  }
-
-  @if (duration() > 0) {
-    <section class="server-panel">
-      <div>
-        <h2>Server Render (FFmpeg)</h2>
-        <p>
-          Send the current trim/cut plan to the Node backend. The server downloads from the provided
-          URL, cuts the requested keep segments, concatenates them, and writes a new file without
-          mutating the original.
-        </p>
-      </div>
-      <div class="server-panel__actions">
-        <button
-          type="button"
-          class="primary"
-          [disabled]="!canRender() || renderBusy()"
-          (click)="renderViaBackend()"
-        >
-          {{ renderBusy() ? 'Rendering…' : 'Send to backend' }}
-        </button>
-        @if (renderResult()) {
-          <div class="render-result">
-            <p class="render-result__info">
-              Job {{ renderResult()?.jobId }} ready
-            </p>
-            @if (renderDownloadUrl()) {
-              <div class="render-result__player">
-                <video
-                  #renderedVideo
-                  [src]="renderDownloadUrl() || undefined"
-                  controls
-                  class="render-result__video"
-                ></video>
-              </div>
-            }
-            <a
-              class="download-link"
-              [href]="renderDownloadUrl() || undefined"
-              download
-              target="_blank"
-              rel="noopener"
-            >
-              Download output
-            </a>
-          </div>
+        </ul>
         } @else {
-          <p class="muted">No server job yet.</p>
+        <p class="muted">No cuts added yet.</p>
+        }
+        } @else {
+        @if (hasSegments()) {
+        <ul class="cuts">
+          @for (segment of segments(); track segment.id) {
+          <li>
+            <div class="cuts__times">
+              <span>{{ formatTime(segment.start) }} – {{ formatTime(segment.end) }}</span>
+              <small>{{ formatTime(segment.end - segment.start) }}</small>
+            </div>
+            <div class="cuts__actions">
+              <button type="button" (click)="jumpTo(segment.start)">Preview</button>
+              <button type="button" class="ghost" (click)="removeSegment(segment.id)">Remove</button>
+            </div>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p class="muted">No segments added yet. Mark parts to keep in the final video.</p>
+        }
         }
       </div>
-    </section>
+
+      <!-- Overlays Queue -->
+      <div class="queue-panel">
+        <h3>Overlay Queue</h3>
+        @if (hasOverlays()) {
+        <ul class="overlays">
+          @for (overlay of overlays(); track overlay.id) {
+          <li>
+            <div class="overlays__info">
+              <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : overlay.type === 'image' ? '🖼️
+                Image' : '🔷 Shape' }}</span>
+              <span class="overlays__times">
+                {{ formatTime(overlay.start) }} – {{ formatTime(overlay.end) }}
+              </span>
+              @if (overlay.type === 'text') {
+              <small>{{ getOverlayText(overlay) }}</small>
+              }
+              @if (overlay.type === 'image') {
+              <small>{{ getOverlayImageUrl(overlay) }}</small>
+              }
+              @if (overlay.type === 'shape') {
+              <small>{{ getOverlayTitle(overlay) }}</small>
+              }
+            </div>
+            <div class="overlays__actions">
+              <button type="button" (click)="focusOverlay(overlay)">Preview</button>
+              <button type="button" class="ghost" (click)="removeOverlay(overlay.id)">Remove</button>
+            </div>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p class="muted">No overlays added yet.</p>
+        }
+      </div>
+    </div>
+
+    <p class="muted">
+      This is a UI prototype. Hook these staged edits into your encoding pipeline
+      (ffmpeg, MediaConvert, etc.) to produce the final asset.
+    </p>
+  </section>
+  }
+
+  @if (duration() > 0) {
+  <section class="server-panel">
+    <div>
+      <h2>Server Render (FFmpeg)</h2>
+      <p>
+        Send the current trim/cut plan to the Node backend. The server downloads from the provided
+        URL, cuts the requested keep segments, concatenates them, and writes a new file without
+        mutating the original.
+      </p>
+    </div>
+    <div class="server-panel__actions">
+      <button type="button" class="primary" [disabled]="!canRender() || renderBusy()" (click)="renderViaBackend()">
+        {{ renderBusy() ? 'Rendering…' : 'Send to backend' }}
+      </button>
+      @if (renderResult()) {
+      <div class="render-result">
+        <p class="render-result__info">
+          Job {{ renderResult()?.jobId }} ready
+        </p>
+        @if (renderDownloadUrl()) {
+        <div class="render-result__player">
+          <video #renderedVideo [src]="renderDownloadUrl() || undefined" controls class="render-result__video"></video>
+        </div>
+        }
+        <a class="download-link" [href]="renderDownloadUrl() || undefined" download target="_blank" rel="noopener">
+          Download output
+        </a>
+      </div>
+      } @else {
+      <p class="muted">No server job yet.</p>
+      }
+    </div>
+  </section>
   }
 </section>
