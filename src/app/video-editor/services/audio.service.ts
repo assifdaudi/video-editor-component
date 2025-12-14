@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import type { AudioSource, TimelineCut } from '../video-editor.types';
-import { calculateAdjustedTime, isRangeInCut } from '../utils/timeline.utils';
+import { calculateAdjustedTime } from '../utils/timeline.utils';
 
 /**
  * Service for managing audio sources and timeline
@@ -17,16 +17,8 @@ export class AudioService {
   // Computed
   protected readonly hasAudio = computed(() => this.audioSources().length > 0);
   protected readonly activeAudioSources = computed(() => {
-    const sources = this.audioSources();
-    const hasSolo = sources.some(s => s.solo);
-    
-    if (hasSolo) {
-      // If any track is solo, only return solo tracks
-      return sources.filter(s => s.solo && !s.muted);
-    }
-    
-    // Otherwise return all non-muted tracks
-    return sources.filter(s => !s.muted);
+    // Return all non-muted tracks
+    return this.audioSources().filter(s => !s.muted);
   });
 
   private audioCounter = 0;
@@ -38,7 +30,7 @@ export class AudioService {
     url: string,
     startTime: number,
     duration: number,
-    volume: number = 1,
+    volume = 1,
     originalDuration?: number
   ): { success: boolean; error?: string; audioId?: number } {
     // Validate URL
@@ -100,7 +92,6 @@ export class AudioService {
       audioTrimEnd: originalDur, // End at full duration
       volume,
       muted: false,
-      solo: false,
       order: this.audioSources().length
     };
 
@@ -196,25 +187,6 @@ export class AudioService {
     }
   }
 
-  /**
-   * Toggle solo for an audio source
-   */
-  toggleSolo(id: number): void {
-    const audio = this.audioSources().find(a => a.id === id);
-    if (audio) {
-      const newSolo = !audio.solo;
-      this.updateAudioSource(id, { solo: newSolo });
-      
-      // If enabling solo, disable solo on all other tracks
-      if (newSolo) {
-        const current = this.audioSources();
-        const updated = current.map(a => 
-          a.id !== id ? { ...a, solo: false } : a
-        );
-        this.audioSources.set(updated);
-      }
-    }
-  }
 
   /**
    * Set master volume
@@ -243,7 +215,7 @@ export class AudioService {
    * - If audio overlaps with any cut region, it is removed (audio is cut with video)
    * - If audio is after cuts, it shifts earlier by the total duration of cuts before it
    */
-  adjustAudioForCuts(cuts: Array<{ start: number; end: number }>, videoDuration: number): void {
+  adjustAudioForCuts(cuts: { start: number; end: number }[], videoDuration: number): void {
     if (cuts.length === 0) {
       return;
     }
@@ -265,8 +237,8 @@ export class AudioService {
       // Use originalStartTime if available, otherwise use current startTime
       // This allows us to recalculate correctly even after previous adjustments
       const originalAudioStart = audio.originalStartTime ?? audio.startTime;
-      let audioStart = originalAudioStart;
-      let audioEnd = originalAudioStart + audio.duration;
+      const audioStart = originalAudioStart;
+      const audioEnd = originalAudioStart + audio.duration;
       
       console.log(`[AudioService] Checking audio ${audio.id}: [${audioStart}s - ${audioEnd}s]`);
       
@@ -318,7 +290,7 @@ export class AudioService {
       cutBoundaries.sort((a, b) => a - b);
       
       // Create segments: parts of audio that are NOT in cuts
-      const segments: Array<{ start: number; end: number }> = [];
+      const segments: { start: number; end: number }[] = [];
       let segmentStart = audioStart;
       
       for (const boundary of cutBoundaries) {

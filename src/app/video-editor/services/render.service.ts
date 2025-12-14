@@ -66,8 +66,7 @@ export class RenderService {
         audioTrimStart: audio.audioTrimStart,
         audioTrimEnd: audio.audioTrimEnd,
         volume: audio.volume,
-        muted: audio.muted,
-        solo: audio.solo
+        muted: audio.muted
       };
     }).filter(audio => audio.duration > 0); // Remove audio that would have no duration after cuts
 

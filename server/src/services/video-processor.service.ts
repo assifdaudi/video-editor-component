@@ -22,36 +22,36 @@ export async function renderVideo(
 ): Promise<RenderResponse> {
   const jobId = uuid();
   const tempDir = await createTempDir(`video-job-${jobId}-`);
-  
+
   try {
     // Prepare sources
     const sources = request.sources || (request.sourceUrl ? [{ url: request.sourceUrl, type: 'video' as const }] : []);
-    
+
     if (sources.length === 0) {
       throw new Error('At least one source is required');
     }
-    
+
     if (request.trimStart >= request.trimEnd) {
       throw new Error('trimStart must be before trimEnd');
     }
-    
+
     // Calculate segments to keep
     const keepSegments = calculateKeepSegments(request.trimStart, request.trimEnd, request.cuts);
-    
+
     if (keepSegments.length === 0) {
       throw new Error('No video content would remain after trimming/cuts');
     }
-    
+
     // Check for quality warnings
     const qualityWarning = checkQualityWarnings(sources);
-    
+
     // Calculate total duration for progress
     const totalDuration = keepSegments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
-    
+
     console.log(`[${jobId}] Starting render with ${sources.length} source(s): ${keepSegments.length} segment(s), total duration: ${totalDuration.toFixed(2)}s`);
-    
+
     if (onProgress) onProgress(1, jobId);
-    
+
     // Process sources
     const { sourceUrl, needsTranscodeFromSource } = await processSources(
       sources,
@@ -59,7 +59,7 @@ export async function renderVideo(
       jobId,
       onProgress
     );
-    
+
     // Extract segments
     const segmentPaths = await extractSegments(
       sourceUrl,
@@ -69,14 +69,14 @@ export async function renderVideo(
       totalDuration,
       onProgress
     );
-    
+
     // Prepare overlays
     const { imageOverlayPaths, hasOverlays } = await prepareOverlays(
       request.overlays,
       tempDir,
       jobId
     );
-    
+
     // Prepare audio sources
     const { audioPaths, hasAudio } = await prepareAudioSources(
       request.audioSources || [],
@@ -85,7 +85,7 @@ export async function renderVideo(
       totalDuration,
       onProgress
     );
-    
+
     // Final render
     const outputFile = await finalRender(
       segmentPaths,
@@ -104,12 +104,12 @@ export async function renderVideo(
       request.audioMixMode || 'mix',
       onProgress
     );
-    
+
     if (onProgress) onProgress(100, jobId);
-    
+
     console.log(`[${jobId}] Progress: 100% - Done`);
     console.log(`[${jobId}] Sending response...`);
-    
+
     const publicPath = `/output/${path.basename(outputFile)}`;
     return {
       jobId,
@@ -118,11 +118,11 @@ export async function renderVideo(
       transcoded: needsTranscodeFromSource,
       warning: qualityWarning
     };
-    
+
   } finally {
     // Cleanup
     setTimeout(() => {
-      removeDir(tempDir).catch(err => 
+      removeDir(tempDir).catch(err =>
         console.error(`[${jobId}] Failed to cleanup temp dir: ${err}`)
       );
     }, 1000);
@@ -139,11 +139,11 @@ async function processSources(
   _onProgress?: (progress: number, jobId: string) => void
 ): Promise<{ sourceUrl: string; needsTranscodeFromSource: boolean }> {
   const hasMpdSource = sources.some(s => isMpdUrl(s.url));
-  
+
   if (sources.length === 1) {
     // Single source
     const source = sources[0]!;
-    
+
     if (source.type === 'image') {
       const { sourcePath } = await processSingleSource(source, 0, 1, tempDir, jobId, false);
       return { sourceUrl: sourcePath, needsTranscodeFromSource: true };
@@ -156,7 +156,7 @@ async function processSources(
   } else {
     // Multiple sources - need to concatenate
     console.log(`[${jobId}] Concatenating ${sources.length} sources...`);
-    
+
     const sourcePaths: string[] = [];
     for (const [index, source] of sources.entries()) {
       const { sourcePath } = await processSingleSource(
@@ -169,7 +169,7 @@ async function processSources(
       );
       sourcePaths.push(sourcePath);
     }
-    
+
     const hasImageSource = sources.some(s => s.type === 'image');
     const concatenatedPath = await concatenateSources(
       sources,
@@ -179,7 +179,7 @@ async function processSources(
       hasMpdSource,
       hasImageSource
     );
-    
+
     return { sourceUrl: concatenatedPath, needsTranscodeFromSource: true };
   }
 }
@@ -196,11 +196,11 @@ async function extractSegments(
   onProgress?: (progress: number, jobId: string) => void
 ): Promise<string[]> {
   const segmentPaths: string[] = [];
-  
+
   for (const [index, segment] of keepSegments.entries()) {
     const segmentPath = path.join(tempDir, `segment-${index}.mp4`);
     const duration = segment.end - segment.start;
-    
+
     await runFfmpegWithProgress(
       [
         '-hide_banner',
@@ -226,10 +226,10 @@ async function extractSegments(
       },
       totalDuration
     );
-    
+
     segmentPaths.push(segmentPath);
   }
-  
+
   return segmentPaths;
 }
 
@@ -243,22 +243,22 @@ async function prepareOverlays(
 ): Promise<{ imageOverlayPaths: string[]; hasOverlays: boolean }> {
   const hasOverlays = overlays && overlays.length > 0;
   const imageOverlayPaths: string[] = [];
-  
+
   if (!hasOverlays) {
     return { imageOverlayPaths, hasOverlays: false };
   }
-  
+
   console.log(`[${jobId}] Downloading ${overlays.filter(o => o.type === 'image').length} image overlay(s)...`);
-  
+
   for (const overlay of overlays) {
     if (overlay.type === 'image') {
       const originalExt = getImageExtension(overlay.imageUrl);
       const imagePath = path.join(tempDir, `overlay-${overlay.id}.${originalExt}`);
-      
+
       try {
         await downloadFile(overlay.imageUrl, imagePath);
         await fsp.access(imagePath);
-        
+
         let finalImagePath = imagePath;
         if (originalExt === 'webp') {
           const pngPath = path.join(tempDir, `overlay-${overlay.id}.png`);
@@ -266,7 +266,7 @@ async function prepareOverlays(
           await convertWebpToPng(imagePath, pngPath, jobId);
           finalImagePath = pngPath;
         }
-        
+
         imageOverlayPaths.push(finalImagePath);
         console.log(`[${jobId}] Using image overlay: ${finalImagePath}`);
       } catch (error) {
@@ -275,7 +275,7 @@ async function prepareOverlays(
       }
     }
   }
-  
+
   return { imageOverlayPaths, hasOverlays: true };
 }
 
@@ -288,7 +288,7 @@ async function prepareAudioSources(
   jobId: string,
   totalDuration: number,
   _onProgress?: (progress: number, jobId: string) => void
-): Promise<{ audioPaths: Array<{ path: string; startTime: number; volume: number }>; hasAudio: boolean }> {
+): Promise<{ audioPaths: { path: string; startTime: number; volume: number }[]; hasAudio: boolean }> {
   if (!audioSources || audioSources.length === 0) {
     return { audioPaths: [], hasAudio: false };
   }
@@ -308,14 +308,14 @@ async function prepareAudioSources(
 
   console.log(`[${jobId}] Processing ${activeAudio.length} audio source(s)...`);
 
-  const audioPaths: Array<{ path: string; startTime: number; volume: number }> = [];
+  const audioPaths: { path: string; startTime: number; volume: number }[] = [];
 
   for (const [index, audio] of activeAudio.entries()) {
     try {
       // Download audio file
       const audioExt = path.extname(new URL(audio.url).pathname) || '.mp3';
       const audioPath = path.join(tempDir, `audio-${index}${audioExt}`);
-      
+
       console.log(`[${jobId}] Downloading audio ${index + 1}/${activeAudio.length}: ${audio.url}`);
       await downloadFile(audio.url, audioPath);
       await fsp.access(audioPath);
@@ -329,7 +329,7 @@ async function prepareAudioSources(
       const audioEndTime = audio.startTime + audio.duration;
       const needsTimelineTrim = audioEndTime > totalDuration;
       const timelineTrimDuration = needsTimelineTrim ? totalDuration - audio.startTime : null;
-      
+
       if (needsTimelineTrim && timelineTrimDuration !== null && timelineTrimDuration <= 0) {
         // Audio starts after video ends, skip it
         continue;
@@ -359,14 +359,14 @@ async function prepareAudioSources(
         }
 
         // Duration to extract (use the smaller of trim duration or timeline trim duration)
-        const extractDuration = needsTimelineTrim && timelineTrimDuration !== null 
+        const extractDuration = needsTimelineTrim && timelineTrimDuration !== null
           ? Math.min(timelineTrimDuration, audioTrimDuration)
           : audioTrimDuration;
         ffmpegArgs.push('-t', extractDuration.toFixed(3));
 
         // Build filter chain
         const filters: string[] = [];
-        
+
         // Apply volume if needed
         if (needsVolume) {
           filters.push(`volume=${audio.volume.toFixed(3)}`);
@@ -389,11 +389,11 @@ async function prepareAudioSources(
         await runFfmpegWithProgress(
           ffmpegArgs,
           jobId,
-          () => {},
+          () => { },
           extractDuration
         );
         finalAudioPath = processedPath;
-        
+
         if (needsTrim) {
           console.log(`[${jobId}] Trimmed audio: ${audioTrimStart.toFixed(3)}s - ${audioTrimEnd.toFixed(3)}s`);
         }
@@ -433,7 +433,7 @@ async function finalRender(
   tempDir: string,
   jobId: string,
   format: string,
-  audioPaths: Array<{ path: string; startTime: number; volume: number }>,
+  audioPaths: { path: string; startTime: number; volume: number }[],
   hasAudio: boolean,
   audioMixMode: 'mix' | 'replace',
   onProgress?: (progress: number, jobId: string) => void
@@ -448,15 +448,15 @@ async function finalRender(
       .join('\n'),
     'utf8'
   );
-  
+
   const outputFile = path.join(serverConfig.outputDir, `${jobId}.${format}`);
-  
+
   // Determine if transcoding is needed
   const needsTranscode =
     hasOverlays ||
     keepSegments.length > 1 ||
     keepSegments.some(segment => segment.end - segment.start < serverConfig.minTranscodeSegmentSeconds);
-  
+
   const concatArgs = [
     '-hide_banner',
     '-y',
@@ -469,14 +469,14 @@ async function finalRender(
     '-i',
     concatFile
   ];
-  
+
   // Add image overlay inputs
   if (hasOverlays && imageOverlayPaths.length > 0) {
     for (const imagePath of imageOverlayPaths) {
       concatArgs.push('-i', imagePath);
     }
   }
-  
+
   // Add audio inputs
   if (hasAudio && audioPaths.length > 0) {
     for (const audio of audioPaths) {
@@ -488,7 +488,6 @@ async function finalRender(
     const filterParts: string[] = [];
     let videoStream = '[0:v]';
     let audioStreams: string[] = [];
-    let nextStreamIndex = 1;
     let needsVideoFilter = false;
 
     // Build overlay filters
@@ -497,7 +496,6 @@ async function finalRender(
       if (filterComplex) {
         filterParts.push(filterComplex);
         videoStream = `[${outputStream}]`;
-        nextStreamIndex = imageOverlayPaths.length + 1;
         needsVideoFilter = true;
       }
     }
@@ -506,8 +504,8 @@ async function finalRender(
     if (hasAudio && audioPaths.length > 0) {
       // Video audio is always from input 0 (the concat input)
       const videoAudioStream = '[0:a]';
-      const audioInputStartIndex = hasOverlays && imageOverlayPaths.length > 0 
-        ? imageOverlayPaths.length + 1 
+      const audioInputStartIndex = hasOverlays && imageOverlayPaths.length > 0
+        ? imageOverlayPaths.length + 1
         : 1;
 
       if (audioMixMode === 'replace') {
@@ -529,7 +527,7 @@ async function finalRender(
             );
             audioStreams.push(`[a${index}]`);
           });
-          
+
           // Mix all audio tracks
           if (audioStreams.length > 1) {
             const mixInputs = audioStreams.join('');
@@ -547,10 +545,10 @@ async function finalRender(
           );
           audioStreams.push(`[a${index}]`);
         });
-        
+
         // Add video audio to the mix
         audioStreams.push(videoAudioStream);
-        
+
         // Mix video audio with additional audio tracks
         if (audioStreams.length > 1) {
           const mixInputs = audioStreams.join('');
@@ -575,7 +573,7 @@ async function finalRender(
     // Build filter_complex
     if (filterParts.length > 0) {
       concatArgs.push('-filter_complex', filterParts.join(';'));
-      
+
       // Map video and audio from filter outputs
       concatArgs.push('-map', videoStream);
       if (audioStreams.length > 0 && audioStreams[0]) {
@@ -586,16 +584,16 @@ async function finalRender(
       concatArgs.push('-map', '0:v');
       concatArgs.push('-map', '0:a?');
     }
-    
+
     const hasMpdSource = sources.some(s => isMpdUrl(s.url));
     const finalPreset = hasMpdSource ? 'medium' : serverConfig.transcodePreset;
     const finalCrf = hasMpdSource ? '18' : serverConfig.transcodeCrf;
-    
+
     console.log(`[${jobId}] Final output quality: CRF ${finalCrf}, Preset ${finalPreset}${hasMpdSource ? ' (MPD detected)' : ''}`);
     if (hasAudio) {
       console.log(`[${jobId}] Audio mode: ${audioMixMode}, ${audioPaths.length} track(s)`);
     }
-    
+
     concatArgs.push(
       '-c:v', 'libx264',
       '-preset', finalPreset,
@@ -608,7 +606,7 @@ async function finalRender(
   } else {
     concatArgs.push('-c', 'copy', outputFile);
   }
-  
+
   await runFfmpegWithProgress(
     concatArgs,
     jobId,
@@ -617,7 +615,7 @@ async function finalRender(
     },
     totalDuration
   );
-  
+
   return outputFile;
 }
 
