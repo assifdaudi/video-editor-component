@@ -368,29 +368,6 @@
       </label>
     </div>
 
-    @if (showAudioForm()) {
-    <div class="audio-form">
-      <h3>Add Audio Track</h3>
-      <div class="field-grid">
-        <label>
-          Audio URL
-          <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
-        </label>
-        <label>
-          Start Time (sec)
-          <input type="number" id="audioStart" step="0.1" [value]="currentTime()" [min]="0" [max]="duration()" />
-        </label>
-        <label>
-          Volume (0-1)
-          <input type="number" id="audioVolume" step="0.1" value="1" min="0" max="1" />
-        </label>
-      </div>
-      <div class="hint">
-        <button type="button" (click)="closeAudioForm()">Cancel</button>
-        <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
-      </div>
-    </div>
-    }
 
     @if (hasAudio()) {
     <div class="audio-sources-list">
@@ -507,6 +484,45 @@
   </section>
   }
 
+
+  <!-- Audio Form Modal -->
+  @if (showAudioForm()) {
+    <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()" tabindex="0">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="audio-form">
+          <div class="audio-form__header">
+            <h3>Add Audio Track</h3>
+            <button 
+              type="button" 
+              class="modal-close-btn"
+              (click)="closeAudioForm()"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="field-grid">
+            <label>
+              Audio URL
+              <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
+            </label>
+            <label>
+              Start Time (sec)
+              <input type="number" id="audioStart" step="0.1" [value]="currentTime()" [min]="0" [max]="duration()" />
+            </label>
+            <label>
+              Volume (0-1)
+              <input type="number" id="audioVolume" step="0.1" value="1" min="0" max="1" />
+            </label>
+          </div>
+          <div class="hint">
+            <button type="button" (click)="closeAudioForm()">Cancel</button>
+            <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
 
   <!-- Overlay Form Modal -->
   @if (showOverlayForm()) {

@@ -160,11 +160,18 @@ export class VideoEditorComponent implements OnDestroy {
   constructor() {
     // Set up keyboard shortcuts for source navigation
     this.keyboardListener = (event: KeyboardEvent): void => {
-      // Handle Escape key to close overlay form (works even when typing in inputs)
-      if (event.key === 'Escape' && this.showOverlayForm()) {
-        event.preventDefault();
-        this.closeOverlayForm();
-        return;
+      // Handle Escape key to close forms (works even when typing in inputs)
+      if (event.key === 'Escape') {
+        if (this.showOverlayForm()) {
+          event.preventDefault();
+          this.closeOverlayForm();
+          return;
+        }
+        if (this.showAudioForm()) {
+          event.preventDefault();
+          this.closeAudioForm();
+          return;
+        }
       }
 
       // Only handle if not typing in an input

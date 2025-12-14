@@ -1198,13 +1198,27 @@
 }
 
 .audio-form {
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
-  border: 1px solid var(--border-muted);
+  padding: 2rem;
+  width: 100%;
+  min-height: 300px;
 
-  h3 {
-    margin-top: 0;
+  &__header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 2px solid var(--border-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    position: relative;
+
+    h3 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      flex: 1;
+    }
   }
 }
 
