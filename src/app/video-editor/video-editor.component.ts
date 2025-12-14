@@ -90,6 +90,11 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly sources = this.playerService.getSources();
   protected readonly duration = this.playerService.getDuration();
   protected readonly currentTime = this.playerService.getCurrentTime();
+  
+  // Computed playhead position (uses preview time during drag for smooth movement)
+  protected readonly playheadTime = computed(() => {
+    return this.previewTime() !== null ? this.previewTime()! : this.currentTime();
+  });
   protected readonly sourceLoaded = this.playerService.getSourceLoaded();
   protected readonly currentSourceIndex = this.playerService.getCurrentSourceIndex();
   
@@ -151,6 +156,7 @@ export class VideoEditorComponent implements OnDestroy {
   private readonly minGap = 0.1;
   private timelineDrag: TimelineDrag = null;
   private audioTimelineDrag: AudioTimelineDrag | null = null;
+  private readonly previewTime = signal<number | null>(null); // Preview time during drag (for smooth playhead movement)
   private nextSourceId = 1;
   private isLoadingSource = false;
   private keyboardListener?: (event: KeyboardEvent) => void;
@@ -975,7 +981,8 @@ export class VideoEditorComponent implements OnDestroy {
       this.timelineSelection.set({ start: time, end: time });
     } else {
       this.timelineDrag = { pointerId: event.pointerId, anchor: time, mode: 'playhead' };
-      this.jumpTo(time);
+      this.previewTime.set(time); // Set preview time for smooth playhead movement
+      this.jumpTo(time); // Seek immediately on click
       if (!isPlayheadHandle) {
         this.timelineSelection.set(null);
       }
@@ -994,7 +1001,8 @@ export class VideoEditorComponent implements OnDestroy {
       const end = Math.max(this.timelineDrag.anchor, time);
       this.timelineSelection.set({ start, end });
     } else {
-      this.jumpTo(time);
+      // Update preview time for smooth playhead movement (don't seek video during drag)
+      this.previewTime.set(time);
     }
   }
 
@@ -1006,7 +1014,14 @@ export class VideoEditorComponent implements OnDestroy {
     const drag = this.timelineDrag;
     target.releasePointerCapture(drag.pointerId);
     const selection = this.timelineSelection();
+    
+    // If we were dragging the playhead, seek to the final position
+    if (drag.mode === 'playhead' && this.previewTime() !== null) {
+      this.jumpTo(this.previewTime()!);
+    }
+    
     this.timelineDrag = null;
+    this.previewTime.set(null);
 
     if (drag.mode === 'selection' && selection) {
       if (this.timelineMode() === 'keep') {
