@@ -159,7 +159,6 @@ export interface AudioSource {
   audioTrimEnd: number; // End trim point within the audio file (originalDuration = end)
   volume: number; // Volume level (0-1)
   muted: boolean; // Whether this track is muted
-  solo: boolean; // Whether this track is solo (only this track plays)
   order: number; // Display order
 }
 

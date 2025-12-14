@@ -1,51 +1,4 @@
 <section class="video-editor">
-  <header class="header">
-    <div class="header__copy">
-      <div class="chip-row">
-        <span class="chip chip--accent">Live preview</span>
-        <span class="chip chip--ghost">Dash.js + FFmpeg</span>
-      </div>
-      <h1>Precision video surgery</h1>
-      <p>
-        Stage trims, carve out awkward segments, and offload rendering to FFmpeg without risking
-        your master asset. Everything happens in the browser until you choose to send it server-side.
-      </p>
-      <ul class="stat-grid">
-        <li>
-          <span class="stat-label">Trim accuracy</span>
-          <strong>±50&nbsp;ms</strong>
-        </li>
-        <li>
-          <span class="stat-label">{{ timelineMode() === 'cut' ? 'Middle cuts' : 'Keep segments' }}</span>
-          <strong>{{ timelineMode() === 'cut' ? cuts().length : segments().length || 0 }}</strong>
-        </li>
-        <li>
-          <span class="stat-label">Segment length</span>
-          <strong>{{ formatTime(trimmedLength()) }}</strong>
-        </li>
-      </ul>
-    </div>
-    <div class="header__panel">
-      <div class="status-card">
-        <p class="status-label">Backend target</p>
-        <strong>{{ backendHost }}</strong>
-        <span class="status-pill" [class.status-pill--ready]="sourceLoaded()">
-          {{ sourceLoaded() ? 'Source ready' : 'Waiting for source' }}
-        </span>
-      </div>
-      <div class="header__actions">
-        <button class="ghost" type="button" (click)="resetEditor(true)">Reset session</button>
-        <button type="button" (click)="setTrimStartFromCurrent()" [disabled]="!sourceLoaded()">
-          Mark in from playhead
-        </button>
-      </div>
-      <p class="header__hint">
-        Load a source URL below then scrub, cut, and ship render jobs without touching the original
-        file.
-      </p>
-    </div>
-  </header>
-
   <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="addSource()">
     <label>
       Source URL (Video or Image)
@@ -55,7 +8,7 @@
     @if (isImageUrl()) {
     <label class="image-duration-field">
       Image Duration (seconds)
-      <input formControlName="imageDuration" type="number" step="0.5" min="0.1" max="60" placeholder="5" />
+      <input formControlName="imageDuration" type="number" step="1" min="0.1" max="60" placeholder="5" />
     </label>
     }
     <button type="submit" [disabled]="sourceForm.invalid || loading()">
@@ -93,7 +46,7 @@
             }
             @if (editingSourceId() === source.id) {
             <span class="source-item__duration-edit">
-              <input type="number" #durationInput [value]="source.duration" step="0.5" min="0.1" max="60"
+              <input type="number" #durationInput [value]="source.duration" step="1" min="0.1" max="60"
                 (keydown.enter)="updateSourceDuration(source.id, +durationInput.value)"
                 (keydown.escape)="cancelEditingSource()" />
               <button type="button" class="ghost" (click)="updateSourceDuration(source.id, +durationInput.value)">
@@ -342,8 +295,8 @@
         <div class="audio-timeline__clip" [attr.data-audio-id]="audio.id" [attr.data-track-index]="trackIndex"
           [style.left.%]="getAudioClipLeft(audio)" [style.width.%]="getAudioClipWidth(audio)"
           [style.top.px]="6 + (trackIndex * 44)" [style.height.px]="40"
-          [class.audio-timeline__clip--muted]="audio.muted" [class.audio-timeline__clip--solo]="audio.solo"
-          (pointerdown)="onAudioTimelinePointerDown($event, audio)" tabindex="0" role="button"
+          [class.audio-timeline__clip--muted]="audio.muted" (pointerdown)="onAudioTimelinePointerDown($event, audio)"
+          tabindex="0" role="button"
           [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'">
           <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
         </div>
@@ -389,14 +342,14 @@
             <div class="audio-source-item__trim-edit">
               <label>
                 Trim Start (in audio file):
-                <input type="number" #trimStartInput [value]="audio.audioTrimStart" step="0.1" [min]="0"
+                <input type="number" #trimStartInput [value]="audio.audioTrimStart" step="1" [min]="0"
                   [max]="audio.audioTrimEnd"
                   (keydown.enter)="updateAudioTrim(audio.id, +trimStartInput.value, audio.audioTrimEnd)"
                   (keydown.escape)="cancelEditingAudio()" />
               </label>
               <label>
                 Trim End (in audio file):
-                <input type="number" #trimEndInput [value]="audio.audioTrimEnd" step="0.1" [min]="audio.audioTrimStart"
+                <input type="number" #trimEndInput [value]="audio.audioTrimEnd" step="1" [min]="audio.audioTrimStart"
                   [max]="audio.originalDuration"
                   (keydown.enter)="updateAudioTrim(audio.id, audio.audioTrimStart, +trimEndInput.value)"
                   (keydown.escape)="cancelEditingAudio()" />
@@ -432,10 +385,6 @@
               [title]="audio.muted ? 'Unmute' : 'Mute'">
               {{ audio.muted ? '🔇' : '🔊' }}
             </button>
-            <button type="button" class="ghost" [class.active]="audio.solo" (click)="toggleAudioSolo(audio.id)"
-              [title]="audio.solo ? 'Disable Solo' : 'Solo'">
-              {{ audio.solo ? '⭐' : '☆' }}
-            </button>
             <button type="button" class="ghost danger" (click)="removeAudioSource(audio.id)" title="Remove">
               Remove
             </button>
@@ -455,92 +404,73 @@
 
   <!-- Cut/Segment Form Modal -->
   @if (showCutForm()) {
-    <div class="modal-overlay" (click)="closeCutForm()" (keydown.escape)="closeCutForm()" tabindex="0">
-      <div class="modal-content" (click)="$event.stopPropagation()">
-        <div class="cut-form">
-          <div class="cut-form__header">
-            <h3>{{ timelineMode() === 'cut' ? 'Manual Cut Entry' : 'Manual Segment Entry' }}</h3>
-            <button 
-              type="button" 
-              class="modal-close-btn"
-              (click)="closeCutForm()"
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <p class="cut-form__description">
-            {{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.' }}
-          </p>
-          <div class="field-grid">
-            <label>
-              Start (sec)
-              <input type="number" step="0.05" [min]="0" [max]="duration()"
-                [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
-                (input)="updateCutSelection('start', $event)" />
-            </label>
-            <label>
-              End (sec)
-              <input type="number" step="0.05" [min]="0" [max]="duration()"
-                [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
-                (input)="updateCutSelection('end', $event)" />
-            </label>
-          </div>
-          <div class="hint">
-            <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
-            <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
-            <button type="button" class="primary" (click)="addCut(); closeCutForm()">
-              {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
-            </button>
-          </div>
+  <div class="modal-overlay" (click)="closeCutForm()" (keydown.escape)="closeCutForm()" tabindex="0">
+    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeCutForm()" tabindex="0">
+      <div class="cut-form">
+        <div class="cut-form__header">
+          <h3>{{ timelineMode() === 'cut' ? 'Manual Cut Entry' : 'Manual Segment Entry' }}</h3>
+        </div>
+        <p class="cut-form__description">
+          {{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final
+          video.' }}
+        </p>
+        <div class="field-grid">
+          <label>
+            Start (sec)
+            <input type="number" step="1" [min]="0" [max]="duration()"
+              [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
+              (input)="updateCutSelection('start', $event)" />
+          </label>
+          <label>
+            End (sec)
+            <input type="number" step="1" [min]="0" [max]="duration()"
+              [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
+              (input)="updateCutSelection('end', $event)" />
+          </label>
+        </div>
+        <div class="hint">
+          <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
+          <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
+          <button type="button" class="primary" (click)="addCut(); closeCutForm()">
+            {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
+          </button>
         </div>
       </div>
     </div>
+  </div>
   }
 
   <!-- Audio Form Modal -->
   @if (showAudioForm()) {
-    <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()" tabindex="0">
-      <div class="modal-content" (click)="$event.stopPropagation()">
-        <div class="audio-form">
-          <div class="audio-form__header">
-            <h3>Add Audio Track</h3>
-            <button 
-              type="button" 
-              class="modal-close-btn"
-              (click)="closeAudioForm()"
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div class="field-grid">
-            <label>
-              Audio URL
-              <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
-            </label>
-            <label>
-              Start Time (sec)
-              <input type="number" id="audioStart" step="0.1" [value]="currentTime()" [min]="0" [max]="duration()" />
-            </label>
-            <label>
-              Volume (0-1)
-              <input type="number" id="audioVolume" step="0.1" value="1" min="0" max="1" />
-            </label>
-          </div>
-          <div class="hint">
-            <button type="button" (click)="closeAudioForm()">Cancel</button>
-            <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
-          </div>
+  <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()" (keydown.enter)="closeAudioForm()" tabindex="0">
+    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeAudioForm()" tabindex="0">
+      <div class="audio-form">
+        <div class="audio-form__header">
+          <h3>Add Audio Track</h3>
+        </div>
+        <div class="field-grid">
+          <label>
+            Audio URL
+            <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
+          </label>
+          <label>
+            Start Time (sec)
+            <input type="number" id="audioStart" step="1" [value]="currentTime()" [min]="0" [max]="duration()" />
+          </label>
+        </div>
+        <div class="hint">
+          <button type="button" (click)="closeAudioForm()">Cancel</button>
+          <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
         </div>
       </div>
     </div>
+  </div>
   }
 
   <!-- Overlay Form Modal -->
   @if (showOverlayForm()) {
-  <div class="modal-overlay" (click)="closeOverlayForm()" (keydown.escape)="closeOverlayForm()" tabindex="0">
-    <div class="modal-content" (click)="$event.stopPropagation()" #overlayFormContainer>
+  <div class="modal-overlay" (click)="closeOverlayForm()" (keydown.escape)="closeOverlayForm()" (keydown.enter)="closeOverlayForm()" tabindex="0">
+    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeOverlayForm()" #overlayFormContainer tabindex="0">
       <div class="overlay-form">
         <div class="overlay-form__header">
           <h3>Add Overlay</h3>
@@ -569,11 +499,11 @@
           </label>
           <label>
             Start (sec)
-            <input type="number" id="textStart" step="0.1" [value]="currentTime()" />
+            <input type="number" id="textStart" step="1" [value]="currentTime()" />
           </label>
           <label>
             End (sec)
-            <input type="number" id="textEnd" step="0.1" [value]="currentTime() + 5" />
+            <input type="number" id="textEnd" step="1" [value]="currentTime() + 5" />
           </label>
           <label>
             X Position (%)
@@ -615,11 +545,11 @@
           </label>
           <label>
             Start (sec)
-            <input type="number" id="imageStart" step="0.1" [value]="currentTime()" />
+            <input type="number" id="imageStart" step="1" [value]="currentTime()" />
           </label>
           <label>
             End (sec)
-            <input type="number" id="imageEnd" step="0.1" [value]="currentTime() + 5" />
+            <input type="number" id="imageEnd" step="1" [value]="currentTime() + 5" />
           </label>
           <label>
             X Position (%)
@@ -650,11 +580,11 @@
           <p class="hint-text">🔲 Rectangle Shape</p>
           <label>
             Start (sec)
-            <input type="number" id="overlayStart" step="0.1" [value]="currentTime()" />
+            <input type="number" id="overlayStart" step="1" [value]="currentTime()" />
           </label>
           <label>
             End (sec)
-            <input type="number" id="overlayEnd" step="0.1" [value]="currentTime() + 5" />
+            <input type="number" id="overlayEnd" step="1" [value]="currentTime() + 5" />
           </label>
           <label>
             X Position (%)

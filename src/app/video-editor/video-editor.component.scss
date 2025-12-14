@@ -1332,12 +1332,6 @@
     border-color: rgba(100, 116, 139, 0.5) !important;
   }
 
-  &--solo {
-    box-shadow: 0 4px 20px rgba(251, 191, 36, 0.6) !important;
-    border-width: 3px;
-    z-index: 15;
-  }
-
   &:hover {
     transform: scale(1.05);
     z-index: 10;
