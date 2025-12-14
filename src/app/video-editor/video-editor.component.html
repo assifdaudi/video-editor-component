@@ -330,19 +330,23 @@
   @if (sourceLoaded()) {
     <section class="timeline-shell">
       <div class="timeline-meta">
-        <h2>Unified timeline</h2>
+        <h2>Timeline</h2>
         <p>
           Click to move the playhead. Hold <kbd>Shift</kbd> and drag to stage a 
           {{ timelineMode() === 'cut' ? 'cut' : 'segment' }} selection.
         </p>
       </div>
-      <div
-        class="timeline"
-        (pointerdown)="onTimelinePointerDown($event)"
-        (pointermove)="onTimelinePointerMove($event)"
-        (pointerup)="onTimelinePointerUp($event)"
-        (pointerleave)="onTimelinePointerLeave()"
-      >
+      
+      <!-- Video Timeline -->
+      <div class="timeline-container">
+        <div class="timeline-label">Video Timeline</div>
+        <div
+          class="timeline"
+          (pointerdown)="onTimelinePointerDown($event)"
+          (pointermove)="onTimelinePointerMove($event)"
+          (pointerup)="onTimelinePointerUp($event)"
+          (pointerleave)="onTimelinePointerLeave()"
+        >
         <div class="timeline__rail"></div>
         <!-- Source boundaries (when multiple sources are concatenated) -->
         @for (boundary of sourceBoundaries(); track boundary) {
@@ -428,18 +432,47 @@
           ></div>
         }
         <div class="timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
+        </div>
       </div>
-    </section>
-  }
 
-  @if (sourceLoaded() && duration() > 0) {
-    <section class="audio-timeline-shell">
-      <div class="timeline-meta">
-        <h2>Audio Timeline</h2>
-        <p>
-          Add audio tracks that will be mixed with or replace the video audio. 
-          Drag audio clips to reposition them on the timeline.
-        </p>
+      <!-- Audio Timeline -->
+      @if (duration() > 0) {
+        <div class="timeline-container">
+          <div class="timeline-label">Audio Timeline</div>
+          <div
+            class="audio-timeline"
+            [style.height.px]="audioTimelineHeight()"
+            (pointermove)="onAudioTimelinePointerMove($event)"
+            (pointerup)="onAudioTimelinePointerUp($event)"
+          >
+            <div class="audio-timeline__rail"></div>
+            @for (audio of audioSources(); track audio.id) {
+              @let trackIndex = getAudioTrackIndex(audio);
+              <div
+                class="audio-timeline__clip"
+                [attr.data-audio-id]="audio.id"
+                [attr.data-track-index]="trackIndex"
+                [style.left.%]="getAudioClipLeft(audio)"
+                [style.width.%]="getAudioClipWidth(audio)"
+                [style.top.px]="6 + (trackIndex * 44)"
+                [style.height.px]="40"
+                [class.audio-timeline__clip--muted]="audio.muted"
+                [class.audio-timeline__clip--solo]="audio.solo"
+                (pointerdown)="onAudioTimelinePointerDown($event, audio)"
+                tabindex="0"
+                role="button"
+                [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'"
+              >
+                <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
+              </div>
+            }
+            <div class="audio-timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
+          </div>
+        </div>
+      }
+
+      <!-- Audio Controls (below both timelines) -->
+      @if (duration() > 0) {
         <div class="audio-controls-header">
           <label class="audio-mix-mode">
             <span>Audio Mode:</span>
@@ -462,9 +495,8 @@
           </label>
           <button type="button" (click)="openAudioForm()">Add Audio Track</button>
         </div>
-      </div>
-      
-      @if (showAudioForm()) {
+
+        @if (showAudioForm()) {
         <div class="audio-form">
           <h3>Add Audio Track</h3>
           <div class="field-grid">
@@ -506,38 +538,8 @@
         </div>
       }
 
-      <div
-        class="audio-timeline"
-        [style.height.px]="audioTimelineHeight()"
-        (pointermove)="onAudioTimelinePointerMove($event)"
-        (pointerup)="onAudioTimelinePointerUp($event)"
-      >
-        <div class="audio-timeline__rail"></div>
-        @for (audio of audioSources(); track audio.id) {
-          @let trackIndex = getAudioTrackIndex(audio);
-          <div
-            class="audio-timeline__clip"
-            [attr.data-audio-id]="audio.id"
-            [attr.data-track-index]="trackIndex"
-            [style.left.%]="getAudioClipLeft(audio)"
-            [style.width.%]="getAudioClipWidth(audio)"
-            [style.top.px]="6 + (trackIndex * 44)"
-            [style.height.px]="40"
-            [class.audio-timeline__clip--muted]="audio.muted"
-            [class.audio-timeline__clip--solo]="audio.solo"
-            (pointerdown)="onAudioTimelinePointerDown($event, audio)"
-            tabindex="0"
-            role="button"
-            [title]="'Audio Track ' + (audio.order + 1) + ': ' + formatTime(audio.startTime) + ' - ' + formatTime(audio.startTime + audio.duration) + ' (Volume: ' + Math.round(audio.volume * 100) + '%)'"
-          >
-            <span class="audio-timeline__clip-label">🎵 Track {{ audio.order + 1 }}</span>
-          </div>
-        }
-        <div class="audio-timeline__playhead" [style.left.%]="percentFor(currentTime())"></div>
-      </div>
-
-      @if (hasAudio()) {
-        <div class="audio-sources-list">
+        @if (hasAudio()) {
+          <div class="audio-sources-list">
           <h3>Audio Tracks ({{ audioSources().length }})</h3>
           <ul class="audio-sources">
             @for (audio of audioSources(); track audio.id) {
@@ -652,9 +654,10 @@
               </li>
             }
           </ul>
-        </div>
-      } @else {
-        <p class="muted">No audio tracks added yet. Click "Add Audio Track" to add one.</p>
+          </div>
+        } @else {
+          <p class="muted">No audio tracks added yet. Click "Add Audio Track" to add one.</p>
+        }
       }
     </section>
   }
@@ -710,48 +713,6 @@
         </div>
       </div>
 
-      <div class="cuts-panel__list">
-        <h3>{{ timelineMode() === 'cut' ? 'Cut queue' : 'Segment queue' }}</h3>
-        @if (timelineMode() === 'cut') {
-          @if (hasCuts()) {
-            <ul class="cuts">
-              @for (cut of cuts(); track cut.id) {
-                <li>
-                  <div class="cuts__times">
-                    <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
-                    <small>{{ formatTime(cut.end - cut.start) }}</small>
-                  </div>
-                  <div class="cuts__actions">
-                    <button type="button" (click)="jumpTo(cut.start)">Preview</button>
-                    <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
-                  </div>
-                </li>
-              }
-            </ul>
-          } @else {
-            <p class="muted">No cuts added yet.</p>
-          }
-        } @else {
-          @if (hasSegments()) {
-            <ul class="cuts">
-              @for (segment of segments(); track segment.id) {
-                <li>
-                  <div class="cuts__times">
-                    <span>{{ formatTime(segment.start) }} – {{ formatTime(segment.end) }}</span>
-                    <small>{{ formatTime(segment.end - segment.start) }}</small>
-                  </div>
-                  <div class="cuts__actions">
-                    <button type="button" (click)="jumpTo(segment.start)">Preview</button>
-                    <button type="button" class="ghost" (click)="removeSegment(segment.id)">Remove</button>
-                  </div>
-                </li>
-              }
-            </ul>
-          } @else {
-            <p class="muted">No segments added yet. Mark parts to keep in the final video.</p>
-          }
-        }
-      </div>
     </section>
   }
 
@@ -760,15 +721,42 @@
       <div class="overlays-panel__header">
         <h2>Overlays</h2>
         <div class="overlays-panel__actions">
-          <button type="button" (click)="openOverlayForm('text')">Add Text</button>
-          <button type="button" (click)="openOverlayForm('image')">Add Image</button>
-          <button type="button" (click)="openOverlayForm('shape')">Add Shape</button>
+          <button type="button" (click)="openOverlayForm('text')">Add Overlay</button>
         </div>
       </div>
 
       @if (showOverlayForm()) {
         <div class="overlay-form" #overlayFormContainer>
-          <h3>Add {{ overlayFormType() === 'text' ? 'Text' : overlayFormType() === 'image' ? 'Image' : 'Shape' }} Overlay</h3>
+          <div class="overlay-form__header">
+            <h3>Add Overlay</h3>
+            <!-- Overlay Type Selection -->
+            <div class="overlay-type-selector">
+              <button 
+                type="button"
+                class="overlay-type-btn"
+                [class.overlay-type-btn--active]="overlayFormType() === 'text'"
+                (click)="overlayFormType.set('text')"
+              >
+                📝 Text
+              </button>
+              <button 
+                type="button"
+                class="overlay-type-btn"
+                [class.overlay-type-btn--active]="overlayFormType() === 'image'"
+                (click)="overlayFormType.set('image')"
+              >
+                🖼️ Image
+              </button>
+              <button 
+                type="button"
+                class="overlay-type-btn"
+                [class.overlay-type-btn--active]="overlayFormType() === 'shape'"
+                (click)="overlayFormType.set('shape')"
+              >
+                🔷 Shape
+              </button>
+            </div>
+          </div>
           
           @if (overlayFormType() === 'text') {
             <div class="field-grid">
@@ -933,49 +921,94 @@
         </div>
       }
 
-      <div class="overlays-panel__list">
-        <h3>Overlay Queue</h3>
-        @if (hasOverlays()) {
-          <ul class="overlays">
-            @for (overlay of overlays(); track overlay.id) {
-              <li>
-                <div class="overlays__info">
-                  <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : overlay.type === 'image' ? '🖼️ Image' : '🔷 Shape' }}</span>
-                  <span class="overlays__times">
-                    {{ formatTime(overlay.start) }} – {{ formatTime(overlay.end) }}
-                  </span>
-                  @if (overlay.type === 'text') {
-                    <small>{{ getOverlayText(overlay) }}</small>
-                  }
-                  @if (overlay.type === 'image') {
-                    <small>{{ getOverlayImageUrl(overlay) }}</small>
-                  }
-                  @if (overlay.type === 'shape') {
-                    <small>{{ getOverlayTitle(overlay) }}</small>
-                  }
-                </div>
-                <div class="overlays__actions">
-                  <button type="button" (click)="focusOverlay(overlay)">Preview</button>
-                  <button type="button" class="ghost" (click)="removeOverlay(overlay.id)">Remove</button>
-                </div>
-              </li>
-            }
-          </ul>
-        } @else {
-          <p class="muted">No overlays added yet.</p>
-        }
-      </div>
     </section>
   }
 
   @if (duration() > 0) {
     <section class="summary">
       <h2>Export Plan</h2>
-      <ol>
-        @for (step of exportPlan(); track $index) {
-          <li>{{ step }}</li>
-        }
-      </ol>
+      
+      <!-- Queues Section -->
+      <div class="queues-section">
+        <!-- Cuts/Segments Queue -->
+        <div class="queue-panel">
+          <h3>{{ timelineMode() === 'cut' ? 'Cut queue' : 'Segment queue' }}</h3>
+          @if (timelineMode() === 'cut') {
+            @if (hasCuts()) {
+              <ul class="cuts">
+                @for (cut of cuts(); track cut.id) {
+                  <li>
+                    <div class="cuts__times">
+                      <span>{{ formatTime(cut.start) }} – {{ formatTime(cut.end) }}</span>
+                      <small>{{ formatTime(cut.end - cut.start) }}</small>
+                    </div>
+                    <div class="cuts__actions">
+                      <button type="button" (click)="jumpTo(cut.start)">Preview</button>
+                      <button type="button" class="ghost" (click)="removeCut(cut.id)">Remove</button>
+                    </div>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="muted">No cuts added yet.</p>
+            }
+          } @else {
+            @if (hasSegments()) {
+              <ul class="cuts">
+                @for (segment of segments(); track segment.id) {
+                  <li>
+                    <div class="cuts__times">
+                      <span>{{ formatTime(segment.start) }} – {{ formatTime(segment.end) }}</span>
+                      <small>{{ formatTime(segment.end - segment.start) }}</small>
+                    </div>
+                    <div class="cuts__actions">
+                      <button type="button" (click)="jumpTo(segment.start)">Preview</button>
+                      <button type="button" class="ghost" (click)="removeSegment(segment.id)">Remove</button>
+                    </div>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="muted">No segments added yet. Mark parts to keep in the final video.</p>
+            }
+          }
+        </div>
+
+        <!-- Overlays Queue -->
+        <div class="queue-panel">
+          <h3>Overlay Queue</h3>
+          @if (hasOverlays()) {
+            <ul class="overlays">
+              @for (overlay of overlays(); track overlay.id) {
+                <li>
+                  <div class="overlays__info">
+                    <span class="overlays__type">{{ overlay.type === 'text' ? '📝 Text' : overlay.type === 'image' ? '🖼️ Image' : '🔷 Shape' }}</span>
+                    <span class="overlays__times">
+                      {{ formatTime(overlay.start) }} – {{ formatTime(overlay.end) }}
+                    </span>
+                    @if (overlay.type === 'text') {
+                      <small>{{ getOverlayText(overlay) }}</small>
+                    }
+                    @if (overlay.type === 'image') {
+                      <small>{{ getOverlayImageUrl(overlay) }}</small>
+                    }
+                    @if (overlay.type === 'shape') {
+                      <small>{{ getOverlayTitle(overlay) }}</small>
+                    }
+                  </div>
+                  <div class="overlays__actions">
+                    <button type="button" (click)="focusOverlay(overlay)">Preview</button>
+                    <button type="button" class="ghost" (click)="removeOverlay(overlay.id)">Remove</button>
+                  </div>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">No overlays added yet.</p>
+          }
+        </div>
+      </div>
+
       <p class="muted">
         This is a UI prototype. Hook these staged edits into your encoding pipeline
         (ffmpeg, MediaConvert, etc.) to produce the final asset.
