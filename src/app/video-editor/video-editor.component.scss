@@ -1222,6 +1222,37 @@
   }
 }
 
+.cut-form {
+  padding: 2rem;
+  width: 100%;
+  min-height: 300px;
+
+  &__header {
+    margin-bottom: 1rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 2px solid var(--border-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    position: relative;
+
+    h3 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      flex: 1;
+    }
+  }
+
+  &__description {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+}
+
 .audio-timeline {
   position: relative;
   min-height: 56px;

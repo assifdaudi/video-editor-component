@@ -79,6 +79,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly showOverlayForm = signal(false);
   protected readonly overlayFormType = signal<'text' | 'image' | 'shape'>('text');
   protected readonly showAudioForm = signal(false);
+  protected readonly showCutForm = signal(false);
   protected readonly editingAudioId = signal<number | null>(null);
   protected readonly renderBusy = signal(false);
   protected readonly renderResult = signal<RenderResponse | null>(null);
@@ -170,6 +171,11 @@ export class VideoEditorComponent implements OnDestroy {
         if (this.showAudioForm()) {
           event.preventDefault();
           this.closeAudioForm();
+          return;
+        }
+        if (this.showCutForm()) {
+          event.preventDefault();
+          this.closeCutForm();
           return;
         }
       }
@@ -1987,6 +1993,21 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected closeAudioForm(): void {
     this.showAudioForm.set(false);
+  }
+
+  /**
+   * Open cut/segment form
+   */
+  protected openCutForm(): void {
+    this.showCutForm.set(true);
+    this.errorMessage.set('');
+  }
+
+  /**
+   * Close cut/segment form
+   */
+  protected closeCutForm(): void {
+    this.showCutForm.set(false);
   }
 
   /**

@@ -260,6 +260,9 @@
     <button type="button" class="toolbar-btn" (click)="openAudioForm()">
       🎵 Add Audio Track
     </button>
+    <button type="button" class="toolbar-btn" (click)="openCutForm()">
+      📝 Manual Entry
+    </button>
   </div>
   }
 
@@ -448,42 +451,52 @@
   </section>
   }
 
-  @if (duration() > 0) {
-  <section class="cuts-panel">
-    <div class="cuts-panel__header">
-      <h2>{{ timelineMode() === 'cut' ? 'Cut Mode' : 'Keep Mode' }}</h2>
-    </div>
 
-    <div class="cuts-panel__form">
-      <h3>{{ timelineMode() === 'cut' ? 'Manual cut entry' : 'Manual segment entry' }}</h3>
-      <p>{{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.'
-        }}</p>
-      <div class="field-grid">
-        <label>
-          Start (sec)
-          <input type="number" step="0.05" [min]="0" [max]="duration()"
-            [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
-            (input)="updateCutSelection('start', $event)" />
-        </label>
-        <label>
-          End (sec)
-          <input type="number" step="0.05" [min]="0" [max]="duration()"
-            [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
-            (input)="updateCutSelection('end', $event)" />
-        </label>
-      </div>
-      <div class="hint">
-        <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
-        <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
-        <button type="button" class="primary" (click)="addCut()">
-          {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
-        </button>
+
+  <!-- Cut/Segment Form Modal -->
+  @if (showCutForm()) {
+    <div class="modal-overlay" (click)="closeCutForm()" (keydown.escape)="closeCutForm()" tabindex="0">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="cut-form">
+          <div class="cut-form__header">
+            <h3>{{ timelineMode() === 'cut' ? 'Manual Cut Entry' : 'Manual Segment Entry' }}</h3>
+            <button 
+              type="button" 
+              class="modal-close-btn"
+              (click)="closeCutForm()"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <p class="cut-form__description">
+            {{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final video.' }}
+          </p>
+          <div class="field-grid">
+            <label>
+              Start (sec)
+              <input type="number" step="0.05" [min]="0" [max]="duration()"
+                [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
+                (input)="updateCutSelection('start', $event)" />
+            </label>
+            <label>
+              End (sec)
+              <input type="number" step="0.05" [min]="0" [max]="duration()"
+                [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
+                (input)="updateCutSelection('end', $event)" />
+            </label>
+          </div>
+          <div class="hint">
+            <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
+            <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
+            <button type="button" class="primary" (click)="addCut(); closeCutForm()">
+              {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
-
-  </section>
   }
-
 
   <!-- Audio Form Modal -->
   @if (showAudioForm()) {
