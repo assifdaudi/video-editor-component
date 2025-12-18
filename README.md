@@ -6,7 +6,10 @@ A modern Angular + TypeScript video editing interface with a Node.js/FFmpeg back
 
 https://github.com/user-attachments/assets/31631395-fbda-4450-8800-3188a147caa5
 
+## New UI:
 
+
+https://github.com/user-attachments/assets/767198b8-f3a6-4228-8413-e74c6963384b
 
 
 
