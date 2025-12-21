@@ -10,6 +10,7 @@ import {
   signal
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { ReactiveFormsModule, Validators, FormBuilder } from '@angular/forms';
 import * as dashjs from 'dashjs';
 import { environment } from '../../environments/environment';
@@ -45,6 +46,7 @@ export class VideoEditorComponent implements OnDestroy {
   @ViewChild('videoEl', { static: true }) private videoElement?: ElementRef<HTMLVideoElement>;
   @ViewChild('overlayFormContainer', { static: false }) private overlayFormContainer?: ElementRef<HTMLElement>;
   @ViewChild('playerContainer', { static: false }) private playerContainer?: ElementRef<HTMLElement>;
+  // Removed file input ViewChilds - using direct DOM queries for better performance
 
   // Private fields (dependencies that must be declared first)
   private readonly fb = inject(FormBuilder);
@@ -85,6 +87,19 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly renderResult = signal<RenderResponse | null>(null);
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   protected readonly resizingOverlay = signal<{ overlay: Overlay; startWidth: number; startHeight: number; startX: number; startY: number; corner: 'se' | 'sw' | 'ne' | 'nw' } | null>(null);
+  
+  // Drag and drop state
+  protected readonly isDraggingSource = signal(false);
+  protected readonly isDraggingAudio = signal(false);
+  protected readonly isDraggingImage = signal(false);
+
+  // Store local files (File objects) - only upload when rendering
+  private readonly localFiles = new Map<string, File>(); // Map URL to File object
+  private readonly objectUrls = new Map<string, string>(); // Map URL to object URL for cleanup
+
+  // Track input values for drag-hint visibility
+  protected readonly audioUrlValue = signal('');
+  protected readonly imageUrlValue = signal('');
 
   // Service signals (delegated)
   protected readonly sources = this.playerService.getSources();
@@ -220,6 +235,13 @@ export class VideoEditorComponent implements OnDestroy {
     if (this.keyboardListener) {
       window.removeEventListener('keydown', this.keyboardListener);
     }
+
+    // Clean up all object URLs
+    this.objectUrls.forEach(url => {
+      URL.revokeObjectURL(url);
+    });
+    this.objectUrls.clear();
+    this.localFiles.clear();
   }
 
   // Protected methods
@@ -829,9 +851,6 @@ export class VideoEditorComponent implements OnDestroy {
     
     // Adjust audio positions
     this.adjustAudioForCuts();
-    
-    // Force immediate change detection
-    this.cdr.detectChanges();
   }
 
   protected removeSegment(id: number): void {
@@ -848,9 +867,6 @@ export class VideoEditorComponent implements OnDestroy {
     
     // Adjust audio positions
     this.adjustAudioForCuts();
-    
-    // Force immediate change detection
-    this.cdr.detectChanges();
   }
 
   protected removeCutFromTimeline(id: number, event?: Event): void {
@@ -1550,7 +1566,7 @@ export class VideoEditorComponent implements OnDestroy {
     this.resizingOverlay.set(null);
   }
 
-  protected renderViaBackend(): void {
+  protected async renderViaBackend(): Promise<void> {
     if (!this.canRender()) {
       this.errorMessage.set('Load a video and set trim points before rendering.');
       return;
@@ -1566,36 +1582,129 @@ export class VideoEditorComponent implements OnDestroy {
     this.renderResult.set(null);
     this.errorMessage.set('');
 
-    // Use effective cuts (converts segments to cuts if in keep mode)
-    const effectiveCuts = this.timelineService.getEffectiveCuts()();
-    
-    this.renderService.render(
-      allSources,
-      this.trimStart(),
-      this.trimEnd(),
-      effectiveCuts,
-      this.overlays(),
-      this.audioSources(),
-      this.audioMixMode()
-    ).subscribe({
-      next: response => {
-        this.renderResult.set(response);
-        this.renderBusy.set(false);
-        
-        // Display warning if present
-        if (response.warning) {
-          this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
+    try {
+      // Collect all local files that need to be uploaded
+      const filesToUpload = new Map<string, File>();
+      const urlMapping = new Map<string, string>(); // Maps local URL to server URL
+
+      // Collect source files
+      for (const source of allSources) {
+        const file = this.localFiles.get(source.url);
+        if (file) {
+          filesToUpload.set(source.url, file);
         }
-      },
-      error: err => {
-        const message =
-          err?.error?.error ||
-          err?.message ||
-          'Render request failed. Ensure the backend server is running.';
-        this.errorMessage.set(message);
-        this.renderBusy.set(false);
       }
-    });
+
+      // Collect audio files
+      for (const audio of this.audioSources()) {
+        const file = this.localFiles.get(audio.url);
+        if (file) {
+          filesToUpload.set(audio.url, file);
+        }
+      }
+
+      // Collect overlay image files
+      for (const overlay of this.overlays()) {
+        if (overlay.type === 'image') {
+          const file = this.localFiles.get(overlay.imageUrl);
+          if (file) {
+            filesToUpload.set(overlay.imageUrl, file);
+          }
+        }
+      }
+
+      // Upload all local files
+      this.errorMessage.set('Uploading files...');
+      for (const [localUrl, file] of filesToUpload.entries()) {
+        const serverUrl = await this.uploadFile(file);
+        urlMapping.set(localUrl, serverUrl);
+      }
+
+      // Replace local URLs with server URLs
+      const sourcesWithServerUrls = allSources.map(s => ({
+        ...s,
+        url: urlMapping.get(s.url) || s.url
+      }));
+
+      const audioWithServerUrls = this.audioSources().map(a => ({
+        ...a,
+        url: urlMapping.get(a.url) || a.url
+      }));
+
+      const overlaysWithServerUrls = this.overlays().map(o => {
+        if (o.type === 'image' && urlMapping.has(o.imageUrl)) {
+          return { ...o, imageUrl: urlMapping.get(o.imageUrl)! };
+        }
+        return o;
+      });
+
+      // Use effective cuts (converts segments to cuts if in keep mode)
+      const effectiveCuts = this.timelineService.getEffectiveCuts()();
+      
+      this.errorMessage.set('Rendering...');
+      this.renderService.render(
+        sourcesWithServerUrls,
+        this.trimStart(),
+        this.trimEnd(),
+        effectiveCuts,
+        overlaysWithServerUrls,
+        audioWithServerUrls,
+        this.audioMixMode()
+      ).subscribe({
+        next: async response => {
+          this.renderResult.set(response);
+          this.renderBusy.set(false);
+          
+          // Display warning if present
+          if (response.warning) {
+            this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
+          }
+
+          // Clean up uploaded files after render completes
+          await this.cleanupUploadedFiles(urlMapping.values());
+        },
+        error: async err => {
+          const message =
+            err?.error?.error ||
+            err?.message ||
+            'Render request failed. Ensure the backend server is running.';
+          this.errorMessage.set(message);
+          this.renderBusy.set(false);
+          
+          // Clean up uploaded files even on error
+          await this.cleanupUploadedFiles(urlMapping.values());
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to upload files';
+      this.errorMessage.set(message);
+      this.renderBusy.set(false);
+    }
+  }
+
+  /**
+   * Clean up uploaded files from server
+   */
+  private async cleanupUploadedFiles(serverUrls: Iterable<string>): Promise<void> {
+    const urls = Array.from(serverUrls);
+    if (urls.length === 0) return;
+
+    try {
+      // Extract filenames from URLs
+      const filenames = urls.map(url => {
+        const match = url.match(/\/uploads\/([^\/]+)$/);
+        return match ? match[1] : null;
+      }).filter((f): f is string => f !== null);
+
+      if (filenames.length > 0) {
+        await firstValueFrom(
+          this.http.post(`${this.backendHost}/api/cleanup`, { filenames })
+        );
+      }
+    } catch (error) {
+      console.warn('Failed to cleanup uploaded files:', error);
+      // Don't show error to user, cleanup failure is not critical
+    }
   }
 
   protected renderDownloadUrl(): string | null {
@@ -1929,6 +2038,444 @@ export class VideoEditorComponent implements OnDestroy {
     this.initializeAudioPlayback();
     this.cancelEditingAudio();
     this.errorMessage.set('');
+  }
+
+  // File upload and drag-and-drop methods
+  /**
+   * Create object URL for local file preview (doesn't upload to server)
+   */
+  protected createLocalFileUrl(file: File): string {
+    const objectUrl = URL.createObjectURL(file);
+    // Store file and object URL for later cleanup
+    this.localFiles.set(objectUrl, file);
+    this.objectUrls.set(objectUrl, objectUrl);
+    return objectUrl;
+  }
+
+  /**
+   * Upload a file to the server (only called during render)
+   */
+  private async uploadFile(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const response = await firstValueFrom(
+        this.http.post<{ success: boolean; url: string; filename: string }>(
+          `${this.backendHost}/api/upload`,
+          formData
+        )
+      );
+      
+      if (!response || !response.success || !response.url) {
+        throw new Error('Upload failed: Invalid response');
+      }
+      
+      // Return full URL
+      return `${this.backendHost}${response.url}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      this.errorMessage.set(`Failed to upload file: ${message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle source file selection
+   */
+  protected async onSourceFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleSourceFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle source file (create object URL for preview, don't upload yet)
+   */
+  protected async handleSourceFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
+      this.sourceForm.controls.sourceUrl.setValue(objectUrl);
+      
+      // Get duration for video files
+      if (file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mpd')) {
+        const duration = await this.getVideoDuration(objectUrl);
+        if (duration && duration > 0) {
+          // Duration will be set when source is added
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle source file:', error);
+      this.errorMessage.set('Failed to load file');
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle source drag over
+   */
+  protected onSourceDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidSourceFile(event.dataTransfer) && !this.isDraggingSource()) {
+      this.isDraggingSource.set(true);
+    }
+  }
+
+  /**
+   * Handle source drag leave
+   */
+  protected onSourceDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change
+    if (this.isDraggingSource()) {
+      this.isDraggingSource.set(false);
+    }
+  }
+
+  /**
+   * Handle source drop
+   */
+  protected async onSourceDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingSource.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidSourceFile(event.dataTransfer)) {
+      await this.handleSourceFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid source file
+   */
+  protected isValidSourceFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.mp4', '.m4v', '.mpd', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Handle audio file selection
+   */
+  protected async onAudioFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleAudioFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle audio file (create object URL for preview, don't upload yet)
+   */
+  protected async handleAudioFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
+      const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
+      if (audioUrlInput) {
+        audioUrlInput.value = objectUrl;
+        this.audioUrlValue.set(objectUrl);
+        // Update has-value class
+        const wrapper = audioUrlInput.closest('.unified-input-wrapper');
+        if (wrapper) {
+          wrapper.classList.toggle('has-value', !!objectUrl);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle audio file:', error);
+      this.errorMessage.set('Failed to load file');
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle audio drag over
+   */
+  protected onAudioDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidAudioFile(event.dataTransfer) && !this.isDraggingAudio()) {
+      this.isDraggingAudio.set(true);
+    }
+  }
+
+  /**
+   * Handle audio drag leave
+   */
+  protected onAudioDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change
+    if (this.isDraggingAudio()) {
+      this.isDraggingAudio.set(false);
+    }
+  }
+
+  /**
+   * Handle audio drop
+   */
+  protected async onAudioDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingAudio.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidAudioFile(event.dataTransfer)) {
+      await this.handleAudioFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid audio file
+   */
+  protected isValidAudioFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.mp3', '.wav', '.ogg', '.aac', '.m4a'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Handle image file selection
+   */
+  protected async onImageFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleImageFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle image file (create object URL for preview, don't upload yet)
+   */
+  protected async handleImageFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
+      const imageUrlInput = document.getElementById('imageUrl') as HTMLInputElement;
+      if (imageUrlInput) {
+        imageUrlInput.value = objectUrl;
+        this.imageUrlValue.set(objectUrl);
+        // Update has-value class
+        const wrapper = imageUrlInput.closest('.unified-input-wrapper');
+        if (wrapper) {
+          wrapper.classList.toggle('has-value', !!objectUrl);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle image file:', error);
+      this.errorMessage.set('Failed to load file');
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle image drag over
+   */
+  protected onImageDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidImageFile(event.dataTransfer) && !this.isDraggingImage()) {
+      this.isDraggingImage.set(true);
+    }
+  }
+
+  /**
+   * Handle image drag leave
+   */
+  protected onImageDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Only update signal if state would change
+    if (this.isDraggingImage()) {
+      this.isDraggingImage.set(false);
+    }
+  }
+
+  /**
+   * Handle image drop
+   */
+  protected async onImageDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingImage.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidImageFile(event.dataTransfer)) {
+      await this.handleImageFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid image file
+   */
+  protected isValidImageFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Update has-value class on input wrapper
+   */
+  protected updateHasValueClass(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const wrapper = input.closest('.unified-input-wrapper');
+    if (wrapper) {
+      wrapper.classList.toggle('has-value', !!input.value);
+      
+      // Update signals for drag-hint visibility (signals trigger change detection automatically)
+      if (input.id === 'audioUrl') {
+        this.audioUrlValue.set(input.value);
+      } else if (input.id === 'imageUrl') {
+        this.imageUrlValue.set(input.value);
+      }
+    }
+  }
+
+  /**
+   * Open file picker for source
+   */
+  protected openSourceFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback: find by template reference
+    const fileInput = document.querySelector('input[type="file"][accept*=".mp4"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
+    }
+  }
+
+  /**
+   * Open file picker for audio
+   */
+  protected openAudioFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback: find by accept attribute
+    const fileInput = document.querySelector('input[type="file"][accept*=".mp3"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
+    }
+  }
+
+  /**
+   * Open file picker for image overlay
+   */
+  protected openImageFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback: find by accept attribute
+    const fileInput = document.querySelector('input[type="file"][accept*=".jpg"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
+    }
   }
 
   // Private methods
@@ -2416,9 +2963,6 @@ export class VideoEditorComponent implements OnDestroy {
     const audioAfter = this.audioSources();
     console.log(`[VideoEditor] Audio after adjustment:`, audioAfter.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
     console.log(`[VideoEditor] Audio adjustment: ${audioBefore.length} -> ${audioAfter.length} tracks`);
-    
-    // Force change detection to update UI
-    this.cdr.detectChanges();
     
     // Reinitialize playback with adjusted audio (will create new elements)
     this.initializeAudioPlayback();

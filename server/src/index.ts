@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import { serverConfig } from './utils/config.utils';
 import { renderRouter } from './routes/render.routes';
+import { uploadRouter } from './routes/upload.routes';
 import { promises as fsp } from 'fs';
 
 /**
@@ -18,6 +19,8 @@ app.use(
 );
 app.use(express.json({ limit: '2mb' }));
 app.use('/output', express.static(serverConfig.outputDir));
+// Serve uploads directory
+app.use('/output/uploads', express.static(serverConfig.outputDir + '/uploads'));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -26,11 +29,14 @@ app.get('/health', (_req, res) => {
 
 // API routes
 app.use('/api', renderRouter);
+app.use('/api', uploadRouter);
 
 // Ensure output directory exists
 async function ensureOutputDir(): Promise<void> {
   try {
     await fsp.mkdir(serverConfig.outputDir, { recursive: true });
+    // Also ensure uploads directory exists
+    await fsp.mkdir(serverConfig.outputDir + '/uploads', { recursive: true });
   } catch (err) {
     console.error('Failed to create output directory:', err);
   }

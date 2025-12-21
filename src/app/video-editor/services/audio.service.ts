@@ -42,8 +42,11 @@ export class AudioService {
     const audioExtensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a', '.flac', '.opus'];
     const urlLower = url.toLowerCase();
     const hasValidExtension = audioExtensions.some(ext => urlLower.includes(ext));
+    const isObjectUrl = urlLower.startsWith('blob:');
+    const isHttpUrl = urlLower.startsWith('http');
     
-    if (!hasValidExtension && !urlLower.startsWith('http')) {
+    // Allow object URLs (from local files) and HTTP URLs, or URLs with valid extensions
+    if (!hasValidExtension && !isHttpUrl && !isObjectUrl) {
       return { 
         success: false, 
         error: 'Invalid audio format. Supported: MP3, WAV, AAC, OGG, M4A, FLAC, OPUS' 
@@ -65,21 +68,7 @@ export class AudioService {
       return { success: false, error: 'Volume must be between 0 and 1' };
     }
 
-    // Check for overlaps with existing audio sources
-    const endTime = startTime + duration;
-    const overlaps = this.audioSources().some(audio => {
-      const audioEnd = audio.startTime + audio.duration;
-      return (
-        (startTime >= audio.startTime && startTime < audioEnd) ||
-        (endTime > audio.startTime && endTime <= audioEnd) ||
-        (startTime <= audio.startTime && endTime >= audioEnd)
-      );
-    });
-
-    if (overlaps) {
-      return { success: false, error: 'Audio sources cannot overlap' };
-    }
-
+    // Note: Audio sources can overlap - they will be mixed together during rendering
     const originalDur = originalDuration ?? duration;
     const newAudio: AudioSource = {
       id: ++this.audioCounter,
@@ -123,7 +112,7 @@ export class AudioService {
       return { success: false, error: 'Start time cannot be negative' };
     }
 
-    // Check if new position would cause overlap
+    // Check if new position would extend beyond video duration
     const endTime = newStartTime + audio.duration;
     if (endTime > maxDuration) {
       // Shorten duration to fit within video
@@ -137,20 +126,7 @@ export class AudioService {
       return { success: true };
     }
 
-    const overlaps = this.audioSources().some(a => {
-      if (a.id === id) return false;
-      const audioEnd = a.startTime + a.duration;
-      return (
-        (newStartTime >= a.startTime && newStartTime < audioEnd) ||
-        (endTime > a.startTime && endTime <= audioEnd) ||
-        (newStartTime <= a.startTime && endTime >= audioEnd)
-      );
-    });
-
-    if (overlaps) {
-      return { success: false, error: 'Audio sources cannot overlap' };
-    }
-
+    // Note: Audio sources can overlap - they will be mixed together during rendering
     this.updateAudioSource(id, { startTime: newStartTime });
     return { success: true };
   }

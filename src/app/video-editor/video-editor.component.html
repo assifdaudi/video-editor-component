@@ -2,8 +2,20 @@
   <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="addSource()">
     <label>
       Source URL (Video or Image)
-      <input formControlName="sourceUrl" type="url" placeholder="https://example.com/video.mp4 or image.jpg"
-        [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched" />
+      <div class="unified-input-wrapper" [class.drag-over]="isDraggingSource()"
+        [class.has-value]="sourceForm.controls.sourceUrl.value" (dragover)="onSourceDragOver($event)"
+        (dragleave)="onSourceDragLeave($event)" (drop)="onSourceDrop($event)">
+        <div class="input-container">
+          <input formControlName="sourceUrl" type="url" placeholder="Enter URL or drag & drop files here"
+            [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched" />
+          <button type="button" class="file-picker-icon-btn" (click)="openSourceFilePicker($event)"
+            (keydown.enter)="openSourceFilePicker($event)" title="Browse files">
+            📁
+          </button>
+        </div>
+        <input type="file" #sourceFileInput accept=".mp4,.m4v,.mpd,.jpg,.jpeg,.png,.gif,.webp"
+          (change)="onSourceFileSelected($event)" style="display: none;" />
+      </div>
     </label>
     @if (isImageUrl()) {
     <label class="image-duration-field">
@@ -442,7 +454,8 @@
 
   <!-- Audio Form Modal -->
   @if (showAudioForm()) {
-  <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()" (keydown.enter)="closeAudioForm()" tabindex="0">
+  <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()"
+    (keydown.enter)="closeAudioForm()" tabindex="0">
     <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeAudioForm()" tabindex="0">
       <div class="audio-form">
         <div class="audio-form__header">
@@ -451,7 +464,19 @@
         <div class="field-grid">
           <label>
             Audio URL
-            <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
+            <div class="unified-input-wrapper" [class.drag-over]="isDraggingAudio()"
+              (dragover)="onAudioDragOver($event)" (dragleave)="onAudioDragLeave($event)" (drop)="onAudioDrop($event)">
+              <div class="input-container">
+                <input type="url" id="audioUrl" placeholder="Enter URL or drag & drop files here"
+                  (input)="updateHasValueClass($event)" />
+                <button type="button" class="file-picker-icon-btn" (click)="openAudioFilePicker($event)"
+                  (keydown.enter)="openAudioFilePicker($event)" title="Browse files">
+                  📁
+                </button>
+              </div>
+              <input type="file" #audioFileInput accept=".mp3,.wav,.ogg,.aac,.m4a"
+                (change)="onAudioFileSelected($event)" style="display: none;" />
+            </div>
           </label>
           <label>
             Start Time (sec)
@@ -469,8 +494,10 @@
 
   <!-- Overlay Form Modal -->
   @if (showOverlayForm()) {
-  <div class="modal-overlay" (click)="closeOverlayForm()" (keydown.escape)="closeOverlayForm()" (keydown.enter)="closeOverlayForm()" tabindex="0">
-    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeOverlayForm()" #overlayFormContainer tabindex="0">
+  <div class="modal-overlay" (click)="closeOverlayForm()" (keydown.escape)="closeOverlayForm()"
+    (keydown.enter)="closeOverlayForm()" tabindex="0">
+    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeOverlayForm()"
+      #overlayFormContainer tabindex="0">
       <div class="overlay-form">
         <div class="overlay-form__header">
           <h3>Add Overlay</h3>
@@ -541,7 +568,19 @@
         <div class="field-grid">
           <label>
             Image URL
-            <input type="url" id="imageUrl" placeholder="https://example.com/image.png" />
+            <div class="unified-input-wrapper" [class.drag-over]="isDraggingImage()"
+              (dragover)="onImageDragOver($event)" (dragleave)="onImageDragLeave($event)" (drop)="onImageDrop($event)">
+              <div class="input-container">
+                <input type="url" id="imageUrl" placeholder="Enter URL or drag & drop files here"
+                  (input)="updateHasValueClass($event)" />
+                <button type="button" class="file-picker-icon-btn" (click)="openImageFilePicker($event)"
+                  (keydown.enter)="openImageFilePicker($event)" title="Browse files">
+                  📁
+                </button>
+              </div>
+              <input type="file" #imageFileInput accept=".jpg,.jpeg,.png,.gif,.webp"
+                (change)="onImageFileSelected($event)" style="display: none;" />
+            </div>
           </label>
           <label>
             Start (sec)
