@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import {
-  ChangeDetectorRef,
   Component,
   ElementRef,
   OnDestroy,
@@ -9,37 +9,36 @@ import {
   inject,
   signal
 } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { ReactiveFormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { environment } from '../../environments/environment';
-import {
-  VideoSource,
-  TimelineCut,
-  TimelineSegment,
-  Overlay,
-  RenderResponse,
-  TimelineDrag,
-  VideoBounds,
-  AudioSource,
-  AudioTimelineDrag
-} from './video-editor.types';
-import { formatTime, clamp } from './video-editor.utils';
-import {
-  RenderService,
-  VideoPlayerService,
-  OverlayService,
-  TimelineService,
-  AudioService
-} from './services';
-import { SourceFormComponent } from './components/source-form/source-form.component';
-import { SourcesPanelComponent } from './components/sources-panel/sources-panel.component';
-import { EditorToolbarComponent } from './components/editor-toolbar/editor-toolbar.component';
 import { AudioFormComponent } from './components/audio-form/audio-form.component';
 import { CutFormComponent } from './components/cut-form/cut-form.component';
+import { EditorToolbarComponent } from './components/editor-toolbar/editor-toolbar.component';
 import { RenderPanelComponent } from './components/render-panel/render-panel.component';
+import { SourceFormComponent } from './components/source-form/source-form.component';
+import { SourcesPanelComponent } from './components/sources-panel/sources-panel.component';
+import {
+  AudioService,
+  OverlayService,
+  RenderService,
+  TimelineService,
+  VideoPlayerService
+} from './services';
 import { createLocalFileUrl } from './utils/file-upload.utils';
-import { getVideoDuration, getAudioDuration } from './utils/video-metadata.utils';
+import { getAudioDuration, getVideoDuration } from './utils/video-metadata.utils';
+import {
+  AudioSource,
+  AudioTimelineDrag,
+  Overlay,
+  RenderResponse,
+  TimelineCut,
+  TimelineDrag,
+  TimelineSegment,
+  VideoBounds,
+  VideoSource
+} from './video-editor.types';
+import { clamp, formatTime } from './video-editor.utils';
 
 @Component({
   selector: 'app-video-editor',
@@ -51,20 +50,18 @@ import { getVideoDuration, getAudioDuration } from './utils/video-metadata.utils
 export class VideoEditorComponent implements OnDestroy {
   // eslint-disable @typescript-eslint/member-ordering
   // ViewChild decorators
-  @ViewChild('videoEl', { static: true }) private videoElement?: ElementRef<HTMLVideoElement>;
-  @ViewChild('overlayFormContainer', { static: false }) private overlayFormContainer?: ElementRef<HTMLElement>;
-  @ViewChild('playerContainer', { static: false }) private playerContainer?: ElementRef<HTMLElement>;
+  @ViewChild('videoEl', { static: true }) protected videoElement?: ElementRef<HTMLVideoElement>;
+  @ViewChild('overlayFormContainer', { static: false }) protected overlayFormContainer?: ElementRef<HTMLElement>;
+  @ViewChild('playerContainer', { static: false }) protected playerContainer?: ElementRef<HTMLElement>;
   // Removed file input ViewChilds - using direct DOM queries for better performance
 
   // Private fields (dependencies that must be declared first)
-  private readonly fb = inject(FormBuilder);
-  private readonly http = inject(HttpClient);
-  private readonly cdr = inject(ChangeDetectorRef);
-  private readonly renderService = inject(RenderService);
-  private readonly playerService = inject(VideoPlayerService);
-  private readonly overlayService = inject(OverlayService);
-  private readonly timelineService = inject(TimelineService);
-  private readonly audioService = inject(AudioService);
+  protected readonly http = inject(HttpClient);
+  protected readonly renderService = inject(RenderService);
+  protected readonly playerService = inject(VideoPlayerService);
+  protected readonly overlayService = inject(OverlayService);
+  protected readonly timelineService = inject(TimelineService);
+  protected readonly audioService = inject(AudioService);
 
   // Protected fields (must come after fb/http due to dependencies)
   protected readonly backendHost = environment.apiBaseUrl;
@@ -89,8 +86,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly isDraggingImage = signal(false);
 
   // Store local files (File objects) - only upload when rendering
-  private readonly localFiles = new Map<string, File>(); // Map URL to File object
-  private readonly objectUrls = new Map<string, string>(); // Map URL to object URL for cleanup
+  protected readonly localFiles = new Map<string, File>(); // Map URL to File object
+  protected readonly objectUrls = new Map<string, string>(); // Map URL to object URL for cleanup
 
   // Track input values for drag-hint visibility
   protected readonly audioUrlValue = signal('');
@@ -114,8 +111,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly cuts = this.timelineService.getCutsForDisplay();
   protected readonly segments = this.timelineService.getSegmentsForDisplay();
   // Keep raw signals for operations that need to modify them
-  private readonly cutsRaw = this.timelineService.getCuts();
-  private readonly segmentsRaw = this.timelineService.getSegments();
+  protected readonly cutsRaw = this.timelineService.getCuts();
+  protected readonly segmentsRaw = this.timelineService.getSegments();
   protected readonly cutSelection = this.timelineService.getCutSelection();
   protected readonly segmentSelection = this.timelineService.getSegmentSelection();
   protected readonly timelineSelection = this.timelineService.getTimelineSelection();
@@ -160,7 +157,6 @@ export class VideoEditorComponent implements OnDestroy {
     // Each track is 44px tall with 6px padding top and bottom
     return Math.max(56, 6 + (maxTrackIndex + 1) * 44 + 6);
   });
-  /* eslint-enable @typescript-eslint/member-ordering */
 
   // Private fields (remaining)
   private readonly minGap = 0.1;
@@ -252,103 +248,6 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected async onSourceFileSelected(file: File): Promise<void> {
     await this.handleSourceFile(file);
-  }
-
-  /**
-   * Add a new source to the timeline (internal method)
-   */
-  private async addSourceFromUrl(url: string, providedDuration?: number): Promise<void> {
-    this.errorMessage.set('');
-
-    if (!url || !url.trim()) {
-      this.errorMessage.set('Provide a valid MP4, MPD, or image URL.');
-      return;
-    }
-
-    if (this.isLoadingSource) {
-      this.errorMessage.set('Please wait for the current source to load.');
-      return;
-    }
-
-    // Determine type based on extension
-    const lowerUrl = url.toLowerCase();
-    const isImage = lowerUrl.match(/\.(jpg|jpeg|png|gif|webp)$/);
-    const isMpd = lowerUrl.endsWith('.mpd');
-    const type: 'video' | 'image' = isImage ? 'image' : 'video';
-
-    // Check if adding this source would mix MPD and MP4 formats
-    if (type === 'video') {
-      const currentSources = this.sources();
-      const hasExistingMpd = currentSources.some(s => s.type === 'video' && s.url.toLowerCase().endsWith('.mpd'));
-      const hasExistingMp4 = currentSources.some(s => s.type === 'video' && !s.url.toLowerCase().endsWith('.mpd'));
-
-      // Check if we're about to mix formats
-      const wouldMixFormats = (isMpd && hasExistingMp4) || (!isMpd && hasExistingMpd);
-
-      if (wouldMixFormats && currentSources.length > 0) {
-        // Show confirmation dialog
-        const sourceType = isMpd ? 'MPD' : 'MP4';
-        const existingType = hasExistingMpd ? 'MPD' : 'MP4';
-
-        const confirmed = confirm(
-          '⚠️ Quality Warning\n\n' +
-          `You are about to add an ${sourceType} source to a timeline that already contains ${existingType} sources.\n\n` +
-          'Mixing MPD and MP4 sources requires multiple encoding passes, which may significantly reduce video quality.\n\n' +
-          'For best quality, use sources of the same format (all MPD or all MP4).\n\n' +
-          'Do you want to continue anyway?'
-        );
-
-        if (!confirmed) {
-          return; // User cancelled
-        }
-      }
-    }
-
-    this.isLoadingSource = true;
-    this.loading.set(true);
-
-    try {
-      // Get duration of the source
-      let duration = 5; // Default 5 seconds for images
-
-      if (type === 'video') {
-        // Load video metadata to get duration
-        duration = await getVideoDuration(url);
-
-        // Validate duration
-        if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
-          throw new Error(`Invalid duration (${duration}) for video: ${url}`);
-        }
-      } else {
-        // Use provided duration or default
-        duration = providedDuration || 5;
-      }
-
-      const currentSources = this.sources();
-      const startTime = currentSources.reduce((sum, s) => sum + s.duration, 0);
-
-      const newSource: VideoSource = {
-        id: this.nextSourceId++,
-        url,
-        type,
-        duration,
-        startTime,
-        order: currentSources.length
-      };
-
-      this.sources.update(sources => [...sources, newSource]);
-      this.updateSourceBoundaries();
-
-      // Load the concatenated sources for preview
-      this.loadConcatenatedSources();
-      
-      // Note: sourceForm is now handled by SourceForm component, no need to reset here
-    } catch (error) {
-      this.errorMessage.set(`Failed to load source: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      this.isLoadingSource = false;
-      this.loading.set(false);
-    }
   }
 
   /**
@@ -1751,56 +1650,6 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Add an audio source (internal method)
-   */
-  private async addAudioSourceFromData(url: string, startTime: number): Promise<void> {
-    const volume = 1; // Default volume, can be adjusted after adding
-
-    if (!url || !url.trim()) {
-      this.errorMessage.set('Audio URL is required');
-      return;
-    }
-
-    // Get audio duration
-    let duration = 0;
-    try {
-      duration = await getAudioDuration(url);
-      if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
-        throw new Error(`Invalid duration (${duration}) for audio: ${url}`);
-      }
-    } catch (error) {
-      this.errorMessage.set(`Failed to load audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return;
-    }
-
-    // Ensure audio doesn't extend beyond video duration
-    const maxDuration = this.duration();
-    const adjustedDuration = Math.min(duration, maxDuration - startTime);
-
-    if (adjustedDuration <= 0) {
-      this.errorMessage.set('Audio would be completely outside video duration');
-      return;
-    }
-
-    const result = this.audioService.addAudioSource(url, startTime, adjustedDuration, volume, duration);
-
-    if (result.success) {
-      // If there are existing cuts, adjust the newly added audio for them
-      const cuts = this.cutsRaw();
-      if (cuts.length > 0) {
-        this.adjustAudioForCuts();
-      } else {
-        this.initializeAudioPlayback();
-      }
-
-      this.closeAudioForm();
-      this.errorMessage.set('');
-    } else {
-      this.errorMessage.set(result.error || 'Failed to add audio source');
-    }
-  }
-
-  /**
    * Remove an audio source
    */
   protected removeAudioSource(id: number): void {
@@ -2378,6 +2227,154 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   // ========== Private Methods ==========
+
+  /**
+   * Add a new source to the timeline (internal method)
+   */
+  private async addSourceFromUrl(url: string, providedDuration?: number): Promise<void> {
+    this.errorMessage.set('');
+
+    if (!url || !url.trim()) {
+      this.errorMessage.set('Provide a valid MP4, MPD, or image URL.');
+      return;
+    }
+
+    if (this.isLoadingSource) {
+      this.errorMessage.set('Please wait for the current source to load.');
+      return;
+    }
+
+    // Determine type based on extension
+    const lowerUrl = url.toLowerCase();
+    const isImage = lowerUrl.match(/\.(jpg|jpeg|png|gif|webp)$/);
+    const isMpd = lowerUrl.endsWith('.mpd');
+    const type: 'video' | 'image' = isImage ? 'image' : 'video';
+
+    // Check if adding this source would mix MPD and MP4 formats
+    if (type === 'video') {
+      const currentSources = this.sources();
+      const hasExistingMpd = currentSources.some(s => s.type === 'video' && s.url.toLowerCase().endsWith('.mpd'));
+      const hasExistingMp4 = currentSources.some(s => s.type === 'video' && !s.url.toLowerCase().endsWith('.mpd'));
+
+      // Check if we're about to mix formats
+      const wouldMixFormats = (isMpd && hasExistingMp4) || (!isMpd && hasExistingMpd);
+
+      if (wouldMixFormats && currentSources.length > 0) {
+        // Show confirmation dialog
+        const sourceType = isMpd ? 'MPD' : 'MP4';
+        const existingType = hasExistingMpd ? 'MPD' : 'MP4';
+
+        const confirmed = confirm(
+          '⚠️ Quality Warning\n\n' +
+          `You are about to add an ${sourceType} source to a timeline that already contains ${existingType} sources.\n\n` +
+          'Mixing MPD and MP4 sources requires multiple encoding passes, which may significantly reduce video quality.\n\n' +
+          'For best quality, use sources of the same format (all MPD or all MP4).\n\n' +
+          'Do you want to continue anyway?'
+        );
+
+        if (!confirmed) {
+          return; // User cancelled
+        }
+      }
+    }
+
+    this.isLoadingSource = true;
+    this.loading.set(true);
+
+    try {
+      // Get duration of the source
+      let duration = 5; // Default 5 seconds for images
+
+      if (type === 'video') {
+        // Load video metadata to get duration
+        duration = await getVideoDuration(url);
+
+        // Validate duration
+        if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+          throw new Error(`Invalid duration (${duration}) for video: ${url}`);
+        }
+      } else {
+        // Use provided duration or default
+        duration = providedDuration || 5;
+      }
+
+      const currentSources = this.sources();
+      const startTime = currentSources.reduce((sum, s) => sum + s.duration, 0);
+
+      const newSource: VideoSource = {
+        id: this.nextSourceId++,
+        url,
+        type,
+        duration,
+        startTime,
+        order: currentSources.length
+      };
+
+      this.sources.update(sources => [...sources, newSource]);
+      this.updateSourceBoundaries();
+
+      // Load the concatenated sources for preview
+      this.loadConcatenatedSources();
+
+      // Note: sourceForm is now handled by SourceForm component, no need to reset here
+    } catch (error) {
+      this.errorMessage.set(`Failed to load source: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      this.isLoadingSource = false;
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Add an audio source (internal method)
+   */
+  private async addAudioSourceFromData(url: string, startTime: number): Promise<void> {
+    const volume = 1; // Default volume, can be adjusted after adding
+
+    if (!url || !url.trim()) {
+      this.errorMessage.set('Audio URL is required');
+      return;
+    }
+
+    // Get audio duration
+    let duration = 0;
+    try {
+      duration = await getAudioDuration(url);
+      if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+        throw new Error(`Invalid duration (${duration}) for audio: ${url}`);
+      }
+    } catch (error) {
+      this.errorMessage.set(`Failed to load audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return;
+    }
+
+    // Ensure audio doesn't extend beyond video duration
+    const maxDuration = this.duration();
+    const adjustedDuration = Math.min(duration, maxDuration - startTime);
+
+    if (adjustedDuration <= 0) {
+      this.errorMessage.set('Audio would be completely outside video duration');
+      return;
+    }
+
+    const result = this.audioService.addAudioSource(url, startTime, adjustedDuration, volume, duration);
+
+    if (result.success) {
+      // If there are existing cuts, adjust the newly added audio for them
+      const cuts = this.cutsRaw();
+      if (cuts.length > 0) {
+        this.adjustAudioForCuts();
+      } else {
+        this.initializeAudioPlayback();
+      }
+
+      this.closeAudioForm();
+      this.errorMessage.set('');
+    } else {
+      this.errorMessage.set(result.error || 'Failed to add audio source');
+    }
+  }
+
   /**
     * Upload a file to the server (only called during render)
     */
