@@ -46,9 +46,7 @@ export class VideoEditorComponent implements OnDestroy {
   @ViewChild('videoEl', { static: true }) private videoElement?: ElementRef<HTMLVideoElement>;
   @ViewChild('overlayFormContainer', { static: false }) private overlayFormContainer?: ElementRef<HTMLElement>;
   @ViewChild('playerContainer', { static: false }) private playerContainer?: ElementRef<HTMLElement>;
-  @ViewChild('sourceFileInput', { static: false }) private sourceFileInput?: ElementRef<HTMLInputElement>;
-  @ViewChild('audioFileInput', { static: false }) private audioFileInput?: ElementRef<HTMLInputElement>;
-  @ViewChild('imageFileInput', { static: false }) private imageFileInput?: ElementRef<HTMLInputElement>;
+  // Removed file input ViewChilds - using direct DOM queries for better performance
 
   // Private fields (dependencies that must be declared first)
   private readonly fb = inject(FormBuilder);
@@ -94,6 +92,14 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly isDraggingSource = signal(false);
   protected readonly isDraggingAudio = signal(false);
   protected readonly isDraggingImage = signal(false);
+
+  // Store local files (File objects) - only upload when rendering
+  private readonly localFiles = new Map<string, File>(); // Map URL to File object
+  private readonly objectUrls = new Map<string, string>(); // Map URL to object URL for cleanup
+
+  // Track input values for drag-hint visibility
+  protected readonly audioUrlValue = signal('');
+  protected readonly imageUrlValue = signal('');
 
   // Service signals (delegated)
   protected readonly sources = this.playerService.getSources();
@@ -229,6 +235,13 @@ export class VideoEditorComponent implements OnDestroy {
     if (this.keyboardListener) {
       window.removeEventListener('keydown', this.keyboardListener);
     }
+
+    // Clean up all object URLs
+    this.objectUrls.forEach(url => {
+      URL.revokeObjectURL(url);
+    });
+    this.objectUrls.clear();
+    this.localFiles.clear();
   }
 
   // Protected methods
@@ -838,9 +851,6 @@ export class VideoEditorComponent implements OnDestroy {
     
     // Adjust audio positions
     this.adjustAudioForCuts();
-    
-    // Force immediate change detection
-    this.cdr.detectChanges();
   }
 
   protected removeSegment(id: number): void {
@@ -857,9 +867,6 @@ export class VideoEditorComponent implements OnDestroy {
     
     // Adjust audio positions
     this.adjustAudioForCuts();
-    
-    // Force immediate change detection
-    this.cdr.detectChanges();
   }
 
   protected removeCutFromTimeline(id: number, event?: Event): void {
@@ -1559,7 +1566,7 @@ export class VideoEditorComponent implements OnDestroy {
     this.resizingOverlay.set(null);
   }
 
-  protected renderViaBackend(): void {
+  protected async renderViaBackend(): Promise<void> {
     if (!this.canRender()) {
       this.errorMessage.set('Load a video and set trim points before rendering.');
       return;
@@ -1575,36 +1582,129 @@ export class VideoEditorComponent implements OnDestroy {
     this.renderResult.set(null);
     this.errorMessage.set('');
 
-    // Use effective cuts (converts segments to cuts if in keep mode)
-    const effectiveCuts = this.timelineService.getEffectiveCuts()();
-    
-    this.renderService.render(
-      allSources,
-      this.trimStart(),
-      this.trimEnd(),
-      effectiveCuts,
-      this.overlays(),
-      this.audioSources(),
-      this.audioMixMode()
-    ).subscribe({
-      next: response => {
-        this.renderResult.set(response);
-        this.renderBusy.set(false);
-        
-        // Display warning if present
-        if (response.warning) {
-          this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
+    try {
+      // Collect all local files that need to be uploaded
+      const filesToUpload = new Map<string, File>();
+      const urlMapping = new Map<string, string>(); // Maps local URL to server URL
+
+      // Collect source files
+      for (const source of allSources) {
+        const file = this.localFiles.get(source.url);
+        if (file) {
+          filesToUpload.set(source.url, file);
         }
-      },
-      error: err => {
-        const message =
-          err?.error?.error ||
-          err?.message ||
-          'Render request failed. Ensure the backend server is running.';
-        this.errorMessage.set(message);
-        this.renderBusy.set(false);
       }
-    });
+
+      // Collect audio files
+      for (const audio of this.audioSources()) {
+        const file = this.localFiles.get(audio.url);
+        if (file) {
+          filesToUpload.set(audio.url, file);
+        }
+      }
+
+      // Collect overlay image files
+      for (const overlay of this.overlays()) {
+        if (overlay.type === 'image') {
+          const file = this.localFiles.get(overlay.imageUrl);
+          if (file) {
+            filesToUpload.set(overlay.imageUrl, file);
+          }
+        }
+      }
+
+      // Upload all local files
+      this.errorMessage.set('Uploading files...');
+      for (const [localUrl, file] of filesToUpload.entries()) {
+        const serverUrl = await this.uploadFile(file);
+        urlMapping.set(localUrl, serverUrl);
+      }
+
+      // Replace local URLs with server URLs
+      const sourcesWithServerUrls = allSources.map(s => ({
+        ...s,
+        url: urlMapping.get(s.url) || s.url
+      }));
+
+      const audioWithServerUrls = this.audioSources().map(a => ({
+        ...a,
+        url: urlMapping.get(a.url) || a.url
+      }));
+
+      const overlaysWithServerUrls = this.overlays().map(o => {
+        if (o.type === 'image' && urlMapping.has(o.imageUrl)) {
+          return { ...o, imageUrl: urlMapping.get(o.imageUrl)! };
+        }
+        return o;
+      });
+
+      // Use effective cuts (converts segments to cuts if in keep mode)
+      const effectiveCuts = this.timelineService.getEffectiveCuts()();
+      
+      this.errorMessage.set('Rendering...');
+      this.renderService.render(
+        sourcesWithServerUrls,
+        this.trimStart(),
+        this.trimEnd(),
+        effectiveCuts,
+        overlaysWithServerUrls,
+        audioWithServerUrls,
+        this.audioMixMode()
+      ).subscribe({
+        next: async response => {
+          this.renderResult.set(response);
+          this.renderBusy.set(false);
+          
+          // Display warning if present
+          if (response.warning) {
+            this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
+          }
+
+          // Clean up uploaded files after render completes
+          await this.cleanupUploadedFiles(urlMapping.values());
+        },
+        error: async err => {
+          const message =
+            err?.error?.error ||
+            err?.message ||
+            'Render request failed. Ensure the backend server is running.';
+          this.errorMessage.set(message);
+          this.renderBusy.set(false);
+          
+          // Clean up uploaded files even on error
+          await this.cleanupUploadedFiles(urlMapping.values());
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to upload files';
+      this.errorMessage.set(message);
+      this.renderBusy.set(false);
+    }
+  }
+
+  /**
+   * Clean up uploaded files from server
+   */
+  private async cleanupUploadedFiles(serverUrls: Iterable<string>): Promise<void> {
+    const urls = Array.from(serverUrls);
+    if (urls.length === 0) return;
+
+    try {
+      // Extract filenames from URLs
+      const filenames = urls.map(url => {
+        const match = url.match(/\/uploads\/([^\/]+)$/);
+        return match ? match[1] : null;
+      }).filter((f): f is string => f !== null);
+
+      if (filenames.length > 0) {
+        await firstValueFrom(
+          this.http.post(`${this.backendHost}/api/cleanup`, { filenames })
+        );
+      }
+    } catch (error) {
+      console.warn('Failed to cleanup uploaded files:', error);
+      // Don't show error to user, cleanup failure is not critical
+    }
   }
 
   protected renderDownloadUrl(): string | null {
@@ -1942,15 +2042,26 @@ export class VideoEditorComponent implements OnDestroy {
 
   // File upload and drag-and-drop methods
   /**
-   * Upload a file to the server
+   * Create object URL for local file preview (doesn't upload to server)
    */
-  protected async uploadFile(file: File): Promise<string> {
+  protected createLocalFileUrl(file: File): string {
+    const objectUrl = URL.createObjectURL(file);
+    // Store file and object URL for later cleanup
+    this.localFiles.set(objectUrl, file);
+    this.objectUrls.set(objectUrl, objectUrl);
+    return objectUrl;
+  }
+
+  /**
+   * Upload a file to the server (only called during render)
+   */
+  private async uploadFile(file: File): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
     
     try {
       const response = await firstValueFrom(
-        this.http.post<{ success: boolean; url: string }>(
+        this.http.post<{ success: boolean; url: string; filename: string }>(
           `${this.backendHost}/api/upload`,
           formData
         )
@@ -1983,17 +2094,27 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Handle source file (upload and set URL)
+   * Handle source file (create object URL for preview, don't upload yet)
    */
   protected async handleSourceFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
     
     try {
-      const url = await this.uploadFile(file);
-      this.sourceForm.controls.sourceUrl.setValue(url);
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
+      this.sourceForm.controls.sourceUrl.setValue(objectUrl);
+      
+      // Get duration for video files
+      if (file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mpd')) {
+        const duration = await this.getVideoDuration(objectUrl);
+        if (duration && duration > 0) {
+          // Duration will be set when source is added
+        }
+      }
     } catch (error) {
       console.error('Failed to handle source file:', error);
+      this.errorMessage.set('Failed to load file');
     } finally {
       this.loading.set(false);
     }
@@ -2005,7 +2126,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected onSourceDragOver(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    if (this.isValidSourceFile(event.dataTransfer)) {
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidSourceFile(event.dataTransfer) && !this.isDraggingSource()) {
       this.isDraggingSource.set(true);
     }
   }
@@ -2016,7 +2138,10 @@ export class VideoEditorComponent implements OnDestroy {
   protected onSourceDragLeave(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingSource.set(false);
+    // Only update signal if state would change
+    if (this.isDraggingSource()) {
+      this.isDraggingSource.set(false);
+    }
   }
 
   /**
@@ -2067,25 +2192,28 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Handle audio file (upload and set URL)
+   * Handle audio file (create object URL for preview, don't upload yet)
    */
   protected async handleAudioFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
     
     try {
-      const url = await this.uploadFile(file);
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
       const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
       if (audioUrlInput) {
-        audioUrlInput.value = url;
+        audioUrlInput.value = objectUrl;
+        this.audioUrlValue.set(objectUrl);
         // Update has-value class
         const wrapper = audioUrlInput.closest('.unified-input-wrapper');
         if (wrapper) {
-          wrapper.classList.toggle('has-value', !!url);
+          wrapper.classList.toggle('has-value', !!objectUrl);
         }
       }
     } catch (error) {
       console.error('Failed to handle audio file:', error);
+      this.errorMessage.set('Failed to load file');
     } finally {
       this.loading.set(false);
     }
@@ -2097,7 +2225,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected onAudioDragOver(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    if (this.isValidAudioFile(event.dataTransfer)) {
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidAudioFile(event.dataTransfer) && !this.isDraggingAudio()) {
       this.isDraggingAudio.set(true);
     }
   }
@@ -2108,7 +2237,10 @@ export class VideoEditorComponent implements OnDestroy {
   protected onAudioDragLeave(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingAudio.set(false);
+    // Only update signal if state would change
+    if (this.isDraggingAudio()) {
+      this.isDraggingAudio.set(false);
+    }
   }
 
   /**
@@ -2159,25 +2291,28 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Handle image file (upload and set URL)
+   * Handle image file (create object URL for preview, don't upload yet)
    */
   protected async handleImageFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
     
     try {
-      const url = await this.uploadFile(file);
+      // Create object URL for preview (doesn't upload to server)
+      const objectUrl = this.createLocalFileUrl(file);
       const imageUrlInput = document.getElementById('imageUrl') as HTMLInputElement;
       if (imageUrlInput) {
-        imageUrlInput.value = url;
+        imageUrlInput.value = objectUrl;
+        this.imageUrlValue.set(objectUrl);
         // Update has-value class
         const wrapper = imageUrlInput.closest('.unified-input-wrapper');
         if (wrapper) {
-          wrapper.classList.toggle('has-value', !!url);
+          wrapper.classList.toggle('has-value', !!objectUrl);
         }
       }
     } catch (error) {
       console.error('Failed to handle image file:', error);
+      this.errorMessage.set('Failed to load file');
     } finally {
       this.loading.set(false);
     }
@@ -2189,7 +2324,8 @@ export class VideoEditorComponent implements OnDestroy {
   protected onImageDragOver(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    if (this.isValidImageFile(event.dataTransfer)) {
+    // Only update signal if state would change (reduces change detection cycles)
+    if (this.isValidImageFile(event.dataTransfer) && !this.isDraggingImage()) {
       this.isDraggingImage.set(true);
     }
   }
@@ -2200,7 +2336,10 @@ export class VideoEditorComponent implements OnDestroy {
   protected onImageDragLeave(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingImage.set(false);
+    // Only update signal if state would change
+    if (this.isDraggingImage()) {
+      this.isDraggingImage.set(false);
+    }
   }
 
   /**
@@ -2245,6 +2384,13 @@ export class VideoEditorComponent implements OnDestroy {
     const wrapper = input.closest('.unified-input-wrapper');
     if (wrapper) {
       wrapper.classList.toggle('has-value', !!input.value);
+      
+      // Update signals for drag-hint visibility (signals trigger change detection automatically)
+      if (input.id === 'audioUrl') {
+        this.audioUrlValue.set(input.value);
+      } else if (input.id === 'imageUrl') {
+        this.imageUrlValue.set(input.value);
+      }
     }
   }
 
@@ -2252,7 +2398,14 @@ export class VideoEditorComponent implements OnDestroy {
    * Open file picker for source
    */
   protected openSourceFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
     if (event) {
+      event.preventDefault();
+      event.stopPropagation();
       const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
       if (wrapper) {
         const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
@@ -2262,9 +2415,10 @@ export class VideoEditorComponent implements OnDestroy {
         }
       }
     }
-    // Fallback to ViewChild
-    if (this.sourceFileInput?.nativeElement) {
-      this.sourceFileInput.nativeElement.click();
+    // Fallback: find by template reference
+    const fileInput = document.querySelector('input[type="file"][accept*=".mp4"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
     }
   }
 
@@ -2272,7 +2426,14 @@ export class VideoEditorComponent implements OnDestroy {
    * Open file picker for audio
    */
   protected openAudioFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
     if (event) {
+      event.preventDefault();
+      event.stopPropagation();
       const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
       if (wrapper) {
         const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
@@ -2282,9 +2443,10 @@ export class VideoEditorComponent implements OnDestroy {
         }
       }
     }
-    // Fallback to ViewChild
-    if (this.audioFileInput?.nativeElement) {
-      this.audioFileInput.nativeElement.click();
+    // Fallback: find by accept attribute
+    const fileInput = document.querySelector('input[type="file"][accept*=".mp3"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
     }
   }
 
@@ -2292,7 +2454,14 @@ export class VideoEditorComponent implements OnDestroy {
    * Open file picker for image overlay
    */
   protected openImageFilePicker(event?: Event): void {
+    // Prevent if clicking on the URL input itself
+    if (event && (event.target as HTMLElement).tagName === 'INPUT') {
+      return;
+    }
+    
     if (event) {
+      event.preventDefault();
+      event.stopPropagation();
       const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
       if (wrapper) {
         const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
@@ -2302,9 +2471,10 @@ export class VideoEditorComponent implements OnDestroy {
         }
       }
     }
-    // Fallback to ViewChild
-    if (this.imageFileInput?.nativeElement) {
-      this.imageFileInput.nativeElement.click();
+    // Fallback: find by accept attribute
+    const fileInput = document.querySelector('input[type="file"][accept*=".jpg"]') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
     }
   }
 
@@ -2793,9 +2963,6 @@ export class VideoEditorComponent implements OnDestroy {
     const audioAfter = this.audioSources();
     console.log(`[VideoEditor] Audio after adjustment:`, audioAfter.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
     console.log(`[VideoEditor] Audio adjustment: ${audioBefore.length} -> ${audioAfter.length} tracks`);
-    
-    // Force change detection to update UI
-    this.cdr.detectChanges();
     
     // Reinitialize playback with adjusted audio (will create new elements)
     this.initializeAudioPlayback();

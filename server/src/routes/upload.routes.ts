@@ -95,3 +95,53 @@ uploadRouter.post('/upload', upload.single('file'), (req: Request, res: Response
   }
 });
 
+/**
+ * POST /api/cleanup
+ * Delete uploaded files from the server
+ */
+uploadRouter.post('/cleanup', async (req: Request, res: Response) => {
+  try {
+    const { filenames } = req.body;
+    
+    if (!Array.isArray(filenames) || filenames.length === 0) {
+      return res.status(400).json({ error: 'filenames array is required' });
+    }
+
+    const uploadDir = path.join(serverConfig.outputDir, 'uploads');
+    const deletedFiles: string[] = [];
+    const errors: string[] = [];
+
+    for (const filename of filenames) {
+      // Validate filename to prevent directory traversal
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        errors.push(`Invalid filename: ${filename}`);
+        continue;
+      }
+
+      const filePath = path.join(uploadDir, filename);
+      
+      try {
+        await fsp.unlink(filePath);
+        deletedFiles.push(filename);
+      } catch (err) {
+        // File might not exist, which is fine
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          errors.push(`Failed to delete ${filename}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      deleted: deletedFiles.length,
+      deletedFiles,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('[Cleanup Error]', error);
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
