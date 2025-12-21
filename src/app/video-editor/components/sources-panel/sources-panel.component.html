@@ -1,0 +1,66 @@
+<section class="sources-panel">
+  <div class="sources-panel__header">
+    <h2>
+      Sources ({{ sources.length }})
+      <span class="sources-panel__total-duration">Total: {{ formatTime(duration) }}</span>
+    </h2>
+    <p class="sources-panel__hint">
+      Sources will be concatenated in the order shown. Reorder them using the arrows.
+    </p>
+  </div>
+  <ul class="sources-list">
+    @for (source of sources; track source.id) {
+    <li class="source-item">
+      <div class="source-item__info">
+        <span class="source-item__type">
+          {{ source.type === 'video' ? '🎥' : '🖼️' }} {{ source.type }}
+          @if (editingSourceId !== source.id) {
+          <small class="source-item__duration">
+            {{ formatTime(source.duration) }}
+            @if (source.type === 'image') {
+            <button type="button" class="edit-duration-btn" (click)="onStartEditing(source.id)"
+              title="Edit duration">
+              ✏️
+            </button>
+            }
+          </small>
+          }
+          @if (editingSourceId === source.id) {
+          <span class="source-item__duration-edit">
+            <input type="number" #durationInput [value]="source.duration" step="1" min="0.1" max="60"
+              (keydown.enter)="onUpdateDuration(source.id, durationInput.value)"
+              (keydown.escape)="onCancelEditing()" />
+            <button type="button" class="ghost" (click)="onUpdateDuration(source.id, durationInput.value)">
+              ✓
+            </button>
+            <button type="button" class="ghost" (click)="onCancelEditing()">
+              ✕
+            </button>
+          </span>
+          }
+        </span>
+        <span class="source-item__url" [title]="source.url">
+          {{ source.url }}
+        </span>
+        <span class="source-item__timeline">
+          {{ formatTime(source.startTime) }} → {{ formatTime(source.startTime + source.duration) }}
+        </span>
+      </div>
+      <div class="source-item__actions">
+        <button type="button" class="ghost" (click)="onMoveUp(source.id)" [disabled]="!canMoveUp(source)"
+          title="Move up">
+          ↑
+        </button>
+        <button type="button" class="ghost" (click)="onMoveDown(source.id)"
+          [disabled]="!canMoveDown(source)" title="Move down">
+          ↓
+        </button>
+        <button type="button" class="ghost danger" (click)="onRemove(source.id)" title="Remove">
+          Remove
+        </button>
+      </div>
+    </li>
+    }
+  </ul>
+</section>
+

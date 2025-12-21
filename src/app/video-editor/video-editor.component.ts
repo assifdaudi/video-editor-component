@@ -11,8 +11,7 @@ import {
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
-import { ReactiveFormsModule, Validators, FormBuilder } from '@angular/forms';
-import * as dashjs from 'dashjs';
+import { ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { environment } from '../../environments/environment';
 import {
   VideoSource,
@@ -33,15 +32,24 @@ import {
   TimelineService,
   AudioService
 } from './services';
+import { SourceFormComponent } from './components/source-form/source-form.component';
+import { SourcesPanelComponent } from './components/sources-panel/sources-panel.component';
+import { EditorToolbarComponent } from './components/editor-toolbar/editor-toolbar.component';
+import { AudioFormComponent } from './components/audio-form/audio-form.component';
+import { CutFormComponent } from './components/cut-form/cut-form.component';
+import { RenderPanelComponent } from './components/render-panel/render-panel.component';
+import { createLocalFileUrl } from './utils/file-upload.utils';
+import { getVideoDuration, getAudioDuration } from './utils/video-metadata.utils';
 
 @Component({
   selector: 'app-video-editor',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, SourceFormComponent, SourcesPanelComponent, EditorToolbarComponent, AudioFormComponent, CutFormComponent, RenderPanelComponent],
   templateUrl: './video-editor.component.html',
   styleUrl: './video-editor.component.scss'
 })
 export class VideoEditorComponent implements OnDestroy {
+  // eslint-disable @typescript-eslint/member-ordering
   // ViewChild decorators
   @ViewChild('videoEl', { static: true }) private videoElement?: ElementRef<HTMLVideoElement>;
   @ViewChild('overlayFormContainer', { static: false }) private overlayFormContainer?: ElementRef<HTMLElement>;
@@ -58,20 +66,8 @@ export class VideoEditorComponent implements OnDestroy {
   private readonly timelineService = inject(TimelineService);
   private readonly audioService = inject(AudioService);
 
-  /* eslint-disable @typescript-eslint/member-ordering */
   // Protected fields (must come after fb/http due to dependencies)
   protected readonly backendHost = environment.apiBaseUrl;
-
-  protected readonly sourceForm = this.fb.nonNullable.group({
-    sourceUrl: ['', [Validators.required]],
-    imageDuration: [5, [Validators.required, Validators.min(0.1), Validators.max(60)]]
-  });
-
-  // Track if current URL is an image
-  protected readonly isImageUrl = computed(() => {
-    const url = this.sourceForm.controls.sourceUrl.value.toLowerCase();
-    return !!url.match(/\.(jpg|jpeg|png|gif|webp)$/);
-  });
 
   // UI-specific state (stays in component)
   protected readonly loading = signal(false);
@@ -88,8 +84,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   protected readonly resizingOverlay = signal<{ overlay: Overlay; startWidth: number; startHeight: number; startX: number; startY: number; corner: 'se' | 'sw' | 'ne' | 'nw' } | null>(null);
 
-  // Drag and drop state
-  protected readonly isDraggingSource = signal(false);
+  // Drag and drop state (for audio and image forms - source is handled by SourceForm component)
   protected readonly isDraggingAudio = signal(false);
   protected readonly isDraggingImage = signal(false);
 
@@ -246,19 +241,26 @@ export class VideoEditorComponent implements OnDestroy {
 
   // Protected methods
   /**
-   * Add a new source to the timeline
+   * Handle source added from SourceForm component
    */
-  protected async addSource(): Promise<void> {
+  protected async onSourceAdded(event: { url: string; duration?: number }): Promise<void> {
+    await this.addSourceFromUrl(event.url, event.duration);
+  }
+
+  /**
+   * Handle file selected from SourceForm component
+   */
+  protected async onSourceFileSelected(file: File): Promise<void> {
+    await this.handleSourceFile(file);
+  }
+
+  /**
+   * Add a new source to the timeline (internal method)
+   */
+  private async addSourceFromUrl(url: string, providedDuration?: number): Promise<void> {
     this.errorMessage.set('');
-    if (this.sourceForm.invalid) {
-      this.sourceForm.markAllAsTouched();
-      return;
-    }
 
-    const rawValue = this.sourceForm.controls.sourceUrl.value ?? '';
-    const url = rawValue.trim();
-
-    if (!url) {
+    if (!url || !url.trim()) {
       this.errorMessage.set('Provide a valid MP4, MPD, or image URL.');
       return;
     }
@@ -311,15 +313,15 @@ export class VideoEditorComponent implements OnDestroy {
 
       if (type === 'video') {
         // Load video metadata to get duration
-        duration = await this.getVideoDuration(url);
+        duration = await getVideoDuration(url);
 
         // Validate duration
         if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
           throw new Error(`Invalid duration (${duration}) for video: ${url}`);
         }
       } else {
-        // Use custom image duration from form
-        duration = this.sourceForm.controls.imageDuration.value || 5;
+        // Use provided duration or default
+        duration = providedDuration || 5;
       }
 
       const currentSources = this.sources();
@@ -336,10 +338,11 @@ export class VideoEditorComponent implements OnDestroy {
 
       this.sources.update(sources => [...sources, newSource]);
       this.updateSourceBoundaries();
-      this.sourceForm.reset();
 
       // Load the concatenated sources for preview
       this.loadConcatenatedSources();
+      
+      // Note: sourceForm is now handled by SourceForm component, no need to reset here
     } catch (error) {
       this.errorMessage.set(`Failed to load source: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -527,12 +530,13 @@ export class VideoEditorComponent implements OnDestroy {
    * Legacy method - kept for backward compatibility
    */
   protected loadVideo(): void {
-    this.addSource();
+    // This method is no longer needed as SourceForm handles source addition
+    // Keeping for backward compatibility but does nothing
   }
 
   protected resetEditor(clearSource = false): void {
     if (clearSource) {
-      this.sourceForm.reset();
+      // Note: sourceForm is now handled by SourceForm component
       this.sources.set([]);
     }
     this.loading.set(false);
@@ -787,6 +791,40 @@ export class VideoEditorComponent implements OnDestroy {
       } else {
         next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
       }
+      this.timelineService.setCutSelection(next.start, next.end);
+    }
+  }
+
+  /**
+   * Handle cut start changed from CutForm component
+   */
+  protected onCutStartChanged(value: number): void {
+    if (this.timelineMode() === 'keep') {
+      const current = this.segmentSelection();
+      const next = { ...current };
+      next.start = this.clamp(value, this.trimStart(), next.end - this.minGap);
+      this.timelineService.setSegmentSelection(next.start, next.end);
+    } else {
+      const current = this.cutSelection();
+      const next = { ...current };
+      next.start = this.clamp(value, this.trimStart(), next.end - this.minGap);
+      this.timelineService.setCutSelection(next.start, next.end);
+    }
+  }
+
+  /**
+   * Handle cut end changed from CutForm component
+   */
+  protected onCutEndChanged(value: number): void {
+    if (this.timelineMode() === 'keep') {
+      const current = this.segmentSelection();
+      const next = { ...current };
+      next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
+      this.timelineService.setSegmentSelection(next.start, next.end);
+    } else {
+      const current = this.cutSelection();
+      const next = { ...current };
+      next.end = this.clamp(value, next.start + this.minGap, this.trimEnd());
       this.timelineService.setCutSelection(next.start, next.end);
     }
   }
@@ -1695,22 +1733,30 @@ export class VideoEditorComponent implements OnDestroy {
   // ========== Audio Management Methods ==========
 
   /**
-   * Add an audio source
+   * Handle audio added from AudioForm component
    */
-  protected async addAudioSource(): Promise<void> {
-    const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
-    const audioStartInput = document.getElementById('audioStart') as HTMLInputElement;
+  protected async onAudioAdded(event: { url: string; startTime: number }): Promise<void> {
+    await this.addAudioSourceFromData(event.url, event.startTime);
+  }
 
-    if (!audioUrlInput || !audioStartInput) {
-      this.errorMessage.set('Audio form inputs not found');
-      return;
-    }
+  /**
+   * Handle audio file selected from AudioForm component
+   */
+  protected async onAudioFileSelected(event: { file: File; url: string }): Promise<void> {
+    // Use the URL from AudioForm (which it created) and store the file with that URL
+    // This ensures the URL in the form matches the one we store, so when the audio
+    // is added with that URL, we can find the file in localFiles
+    this.localFiles.set(event.url, event.file);
+    this.objectUrls.set(event.url, event.url);
+  }
 
-    const url = audioUrlInput.value.trim();
-    const startTime = parseFloat(audioStartInput.value) || this.currentTime();
+  /**
+   * Add an audio source (internal method)
+   */
+  private async addAudioSourceFromData(url: string, startTime: number): Promise<void> {
     const volume = 1; // Default volume, can be adjusted after adding
 
-    if (!url) {
+    if (!url || !url.trim()) {
       this.errorMessage.set('Audio URL is required');
       return;
     }
@@ -1718,7 +1764,7 @@ export class VideoEditorComponent implements OnDestroy {
     // Get audio duration
     let duration = 0;
     try {
-      duration = await this.getAudioDuration(url);
+      duration = await getAudioDuration(url);
       if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
         throw new Error(`Invalid duration (${duration}) for audio: ${url}`);
       }
@@ -2019,30 +2065,6 @@ export class VideoEditorComponent implements OnDestroy {
 
   // File upload and drag-and-drop methods
   /**
-   * Create object URL for local file preview (doesn't upload to server)
-   */
-  protected createLocalFileUrl(file: File): string {
-    const objectUrl = URL.createObjectURL(file);
-    // Store file and object URL for later cleanup
-    this.localFiles.set(objectUrl, file);
-    this.objectUrls.set(objectUrl, objectUrl);
-    return objectUrl;
-  }
-
-  /**
-   * Handle source file selection
-   */
-  protected async onSourceFileSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    await this.handleSourceFile(file);
-    // Reset input
-    input.value = '';
-  }
-
-  /**
    * Handle source file (create object URL for preview, don't upload yet)
    */
   protected async handleSourceFile(file: File): Promise<void> {
@@ -2051,15 +2073,28 @@ export class VideoEditorComponent implements OnDestroy {
 
     try {
       // Create object URL for preview (doesn't upload to server)
-      const objectUrl = this.createLocalFileUrl(file);
-      this.sourceForm.controls.sourceUrl.setValue(objectUrl);
+      const objectUrl = createLocalFileUrl(file);
+      this.localFiles.set(objectUrl, file);
+      this.objectUrls.set(objectUrl, objectUrl);
 
       // Get duration for video files
       if (file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mpd')) {
-        const duration = await this.getVideoDuration(objectUrl);
-        if (duration && duration > 0) {
+        try {
+          await getVideoDuration(objectUrl);
           // Duration will be set when source is added
+        } catch (error) {
+          console.error('Failed to get video duration:', error);
         }
+      }
+
+      // Auto-add the source
+      const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+      if (isImage) {
+        // For images, use default duration
+        await this.addSourceFromUrl(objectUrl, 5);
+      } else {
+        // For videos, get duration first
+        await this.addSourceFromUrl(objectUrl);
       }
     } catch (error) {
       console.error('Failed to handle source file:', error);
@@ -2070,102 +2105,15 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Handle source drag over
-   */
-  protected onSourceDragOver(event: DragEvent): void {
-    event.preventDefault();
-    event.stopPropagation();
-    // Only update signal if state would change (reduces change detection cycles)
-    if (this.isValidSourceFile(event.dataTransfer) && !this.isDraggingSource()) {
-      this.isDraggingSource.set(true);
-    }
-  }
-
-  /**
-   * Handle source drag leave
-   */
-  protected onSourceDragLeave(event: DragEvent): void {
-    event.preventDefault();
-    event.stopPropagation();
-    // Only update signal if state would change
-    if (this.isDraggingSource()) {
-      this.isDraggingSource.set(false);
-    }
-  }
-
-  /**
-   * Handle source drop
-   */
-  protected async onSourceDrop(event: DragEvent): Promise<void> {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isDraggingSource.set(false);
-
-    const file = event.dataTransfer?.files[0];
-    if (file && this.isValidSourceFile(event.dataTransfer)) {
-      await this.handleSourceFile(file);
-    }
-  }
-
-  /**
-   * Check if dragged file is a valid source file
-   */
-  protected isValidSourceFile(dataTransfer: DataTransfer | null): boolean {
-    if (!dataTransfer) return false;
-
-    const items = Array.from(dataTransfer.items);
-    if (items.length === 0) return false;
-
-    const item = items[0];
-    if (item.kind !== 'file') return false;
-
-    const file = item.getAsFile();
-    if (!file) return false;
-
-    const name = file.name.toLowerCase();
-    const validExtensions = ['.mp4', '.m4v', '.mpd', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    return validExtensions.some(ext => name.endsWith(ext));
-  }
-
-  /**
-   * Handle audio file selection
-   */
-  protected async onAudioFileSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    await this.handleAudioFile(file);
-    // Reset input
-    input.value = '';
-  }
-
-  /**
    * Handle audio file (create object URL for preview, don't upload yet)
+   * Note: AudioForm component will handle setting the URL in its own input
    */
   protected async handleAudioFile(file: File): Promise<void> {
-    this.loading.set(true);
-    this.errorMessage.set('');
-
-    try {
-      // Create object URL for preview (doesn't upload to server)
-      const objectUrl = this.createLocalFileUrl(file);
-      const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
-      if (audioUrlInput) {
-        audioUrlInput.value = objectUrl;
-        this.audioUrlValue.set(objectUrl);
-        // Update has-value class
-        const wrapper = audioUrlInput.closest('.unified-input-wrapper');
-        if (wrapper) {
-          wrapper.classList.toggle('has-value', !!objectUrl);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to handle audio file:', error);
-      this.errorMessage.set('Failed to load file');
-    } finally {
-      this.loading.set(false);
-    }
+    // Create object URL for preview (doesn't upload to server)
+    // The AudioForm component will handle setting this URL in its input
+    const objectUrl = createLocalFileUrl(file);
+    this.localFiles.set(objectUrl, file);
+    this.objectUrls.set(objectUrl, objectUrl);
   }
 
   /**
@@ -2248,7 +2196,9 @@ export class VideoEditorComponent implements OnDestroy {
 
     try {
       // Create object URL for preview (doesn't upload to server)
-      const objectUrl = this.createLocalFileUrl(file);
+      const objectUrl = createLocalFileUrl(file);
+      this.localFiles.set(objectUrl, file);
+      this.objectUrls.set(objectUrl, objectUrl);
       const imageUrlInput = document.getElementById('imageUrl') as HTMLInputElement;
       if (imageUrlInput) {
         imageUrlInput.value = objectUrl;
@@ -2481,100 +2431,6 @@ export class VideoEditorComponent implements OnDestroy {
     }
   }
 
-  /**
-   * Get duration of a video by loading its metadata
-   */
-  private getVideoDuration(url: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-
-      const isMpd = url.toLowerCase().endsWith('.mpd');
-
-      if (isMpd) {
-        // Use dash.js for MPD files
-        const player = dashjs.MediaPlayer().create();
-
-        const timeout = setTimeout(() => {
-          player.reset();
-          reject(new Error('Timeout loading MPD metadata (10s)'));
-        }, 10000); // 10 second timeout
-
-        // Dash.js fires 'canPlay' when stream is ready
-        const onCanPlay = (): void => {
-          clearTimeout(timeout);
-          const duration = video.duration;
-
-          if (duration && !isNaN(duration) && isFinite(duration) && duration > 0) {
-            player.reset();
-            resolve(duration);
-          } else {
-            player.reset();
-            reject(new Error(`Could not determine video duration from MPD (got ${duration})`));
-          }
-        };
-
-        const onStreamInitialized = (): void => {
-          // Sometimes duration is available after stream initialization
-          if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
-            clearTimeout(timeout);
-            player.reset();
-            resolve(video.duration);
-          }
-        };
-
-        const onError = (e: { error?: string }): void => {
-          clearTimeout(timeout);
-          player.reset();
-          reject(new Error(`Failed to load MPD metadata: ${e.error || 'Unknown error'}`));
-        };
-
-        const onManifestLoaded = (e: { data?: { mediaPresentationDuration?: number } }): void => {
-          // The manifest might contain duration info
-          if (e && e.data && e.data.mediaPresentationDuration) {
-            clearTimeout(timeout);
-            player.reset();
-            resolve(e.data.mediaPresentationDuration);
-          }
-        };
-
-        // Listen to dash.js events
-        player.on(dashjs.MediaPlayer.events.CAN_PLAY, onCanPlay);
-        player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onStreamInitialized);
-        player.on(dashjs.MediaPlayer.events.ERROR, onError);
-        player.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, onManifestLoaded);
-
-        // Also listen to video element events as fallback
-        video.addEventListener('loadedmetadata', () => {
-          if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
-            clearTimeout(timeout);
-            player.reset();
-            resolve(video.duration);
-          }
-        }, { once: true });
-
-        // Initialize the player
-        player.initialize(video, url, false);
-      } else {
-        // Regular MP4 or other video format
-        video.addEventListener('loadedmetadata', () => {
-          if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
-            resolve(video.duration);
-          } else {
-            reject(new Error('Could not determine video duration'));
-          }
-          video.src = '';
-        });
-
-        video.addEventListener('error', () => {
-          reject(new Error('Failed to load video metadata'));
-          video.src = '';
-        });
-
-        video.src = url;
-      }
-    });
-  }
 
   /**
    * Update source boundaries for timeline visualization
@@ -2690,24 +2546,6 @@ export class VideoEditorComponent implements OnDestroy {
   /**
    * Get audio duration
    */
-  private async getAudioDuration(url: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const audio = new Audio();
-      audio.preload = 'metadata';
-
-      audio.addEventListener('loadedmetadata', () => {
-        resolve(audio.duration);
-        audio.src = '';
-      });
-
-      audio.addEventListener('error', () => {
-        reject(new Error('Failed to load audio metadata'));
-        audio.src = '';
-      });
-
-      audio.src = url;
-    });
-  }
 
   private addShapeOverlay(
     shapeType: 'rectangle',

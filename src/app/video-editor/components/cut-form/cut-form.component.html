@@ -1,0 +1,28 @@
+<app-modal [isOpen]="isOpen" [title]="timelineMode === 'cut' ? 'Add Cut' : 'Add Segment'" (closed)="onClose()">
+  <div class="cut-form">
+    <p class="hint-text">
+      {{ timelineMode === 'cut' ? 'Define the time range to remove from the video.' : 'Define the time range to keep in
+      the video.' }}
+    </p>
+    <div class="field-grid">
+      <label>
+        Start (sec)
+        <input type="number" step="1" [min]="0" [max]="duration" [value]="start()"
+          (input)="onStartChange($event)" />
+      </label>
+      <label>
+        End (sec)
+        <input type="number" step="1" [min]="0" [max]="duration" [value]="end()"
+          (input)="onEndChange($event)" />
+      </label>
+    </div>
+    <div class="hint">
+      <button type="button" (click)="onUsePlayheadForStart()">Use playhead for start</button>
+      <button type="button" (click)="onUsePlayheadForEnd()">Use playhead for end</button>
+      <button type="button" class="primary" (click)="onSubmit()">
+        {{ timelineMode === 'cut' ? 'Add Cut' : 'Add Segment' }}
+      </button>
+    </div>
+  </div>
+</app-modal>
+

@@ -1,0 +1,12 @@
+<div class="unified-input-wrapper" [class.drag-over]="isDragging()" [class.has-value]="value"
+    (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" (drop)="onDrop($event)">
+    <div class="input-container">
+        <input [id]="inputId" type="url" [placeholder]="placeholder" [value]="value" (input)="onInput($event)"
+            [class.invalid]="false" />
+        <button type="button" class="file-picker-icon-btn" (click)="openFilePicker($event)"
+            (keydown.enter)="openFilePicker($event)" title="Browse files">
+            📁
+        </button>
+    </div>
+    <input #fileInput type="file" [accept]="accept" (change)="onFileSelected($event)" style="display: none;" />
+</div>

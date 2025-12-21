@@ -531,7 +531,7 @@ async function finalRender(
           // Mix all audio tracks
           if (audioStreams.length > 1) {
             const mixInputs = audioStreams.join('');
-            filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=longest[amixed]`);
+            filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=shortest[amixed]`);
             audioStreams = ['[amixed]'];
           }
         }
@@ -552,7 +552,7 @@ async function finalRender(
         // Mix video audio with additional audio tracks
         if (audioStreams.length > 1) {
           const mixInputs = audioStreams.join('');
-          filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=longest[amixed]`);
+          filterParts.push(`${mixInputs}amix=inputs=${audioStreams.length}:duration=shortest[amixed]`);
           audioStreams = ['[amixed]'];
         } else {
           // Only video audio
@@ -600,6 +600,7 @@ async function finalRender(
       '-crf', finalCrf,
       '-c:a', 'aac',
       '-b:a', serverConfig.transcodeAudioBitrate,
+      '-shortest', // Stop encoding when the shortest input stream ends (video)
       '-movflags', '+faststart',
       outputFile
     );
