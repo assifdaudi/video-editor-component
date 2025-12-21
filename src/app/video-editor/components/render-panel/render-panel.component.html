@@ -1,0 +1,29 @@
+<section class="export-plan">
+  <h2>Export Plan</h2>
+  <ul>
+    @for (step of exportPlan; track $index) {
+    <li>{{ step }}</li>
+    }
+  </ul>
+  <div class="render-actions">
+    <button type="button" class="primary" [disabled]="!canRender || renderBusy" (click)="onRender()">
+      {{ renderBusy ? 'Rendering…' : 'Send to backend' }}
+    </button>
+    @if (renderResult) {
+    <div class="render-result">
+      <p class="render-result__status">
+        Job {{ renderResult.jobId }} ready
+      </p>
+      @if (downloadUrl) {
+      <div class="render-result__preview">
+        <video [src]="downloadUrl" controls class="render-result__video"></video>
+      </div>
+      <a class="download-link" [href]="downloadUrl" download target="_blank" rel="noopener">
+        Download Video
+      </a>
+      }
+    </div>
+    }
+  </div>
+</section>
+

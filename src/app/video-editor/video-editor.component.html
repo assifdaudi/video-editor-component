@@ -1,99 +1,12 @@
 <section class="video-editor">
-  <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="addSource()">
-    <label>
-      Source URL (Video or Image)
-      <div class="unified-input-wrapper" [class.drag-over]="isDraggingSource()"
-        [class.has-value]="sourceForm.controls.sourceUrl.value" (dragover)="onSourceDragOver($event)"
-        (dragleave)="onSourceDragLeave($event)" (drop)="onSourceDrop($event)">
-        <div class="input-container">
-          <input formControlName="sourceUrl" type="url" placeholder="Enter URL or drag & drop files here"
-            [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched" />
-          <button type="button" class="file-picker-icon-btn" (click)="openSourceFilePicker($event)"
-            (keydown.enter)="openSourceFilePicker($event)" title="Browse files">
-            📁
-          </button>
-        </div>
-        <input type="file" #sourceFileInput accept=".mp4,.m4v,.mpd,.jpg,.jpeg,.png,.gif,.webp"
-          (change)="onSourceFileSelected($event)" style="display: none;" />
-      </div>
-    </label>
-    @if (isImageUrl()) {
-    <label class="image-duration-field">
-      Image Duration (seconds)
-      <input formControlName="imageDuration" type="number" step="1" min="0.1" max="60" placeholder="5" />
-    </label>
-    }
-    <button type="submit" [disabled]="sourceForm.invalid || loading()">
-      {{ loading() ? 'Adding…' : 'Add to Timeline' }}
-    </button>
-  </form>
+  <app-source-form [loading]="loading()" (sourceAdded)="onSourceAdded($event)"
+    (fileSelected)="onSourceFileSelected($event)" />
 
   @if (sources().length > 0) {
-  <section class="sources-panel">
-    <div class="sources-panel__header">
-      <h2>
-        Sources ({{ sources().length }})
-        <span class="sources-panel__total-duration">Total: {{ formatTime(duration()) }}</span>
-      </h2>
-      <p class="sources-panel__hint">
-        Sources will be concatenated in the order shown. Reorder them using the arrows.
-      </p>
-    </div>
-    <ul class="sources-list">
-      @for (source of sources(); track source.id) {
-      <li class="source-item">
-        <div class="source-item__info">
-          <span class="source-item__type">
-            {{ source.type === 'video' ? '🎥' : '🖼️' }} {{ source.type }}
-            @if (editingSourceId() !== source.id) {
-            <small class="source-item__duration">
-              {{ formatTime(source.duration) }}
-              @if (source.type === 'image') {
-              <button type="button" class="edit-duration-btn" (click)="startEditingSource(source.id)"
-                title="Edit duration">
-                ✏️
-              </button>
-              }
-            </small>
-            }
-            @if (editingSourceId() === source.id) {
-            <span class="source-item__duration-edit">
-              <input type="number" #durationInput [value]="source.duration" step="1" min="0.1" max="60"
-                (keydown.enter)="updateSourceDuration(source.id, +durationInput.value)"
-                (keydown.escape)="cancelEditingSource()" />
-              <button type="button" class="ghost" (click)="updateSourceDuration(source.id, +durationInput.value)">
-                ✓
-              </button>
-              <button type="button" class="ghost" (click)="cancelEditingSource()">
-                ✕
-              </button>
-            </span>
-            }
-          </span>
-          <span class="source-item__url" [title]="source.url">
-            {{ source.url }}
-          </span>
-          <span class="source-item__timeline">
-            {{ formatTime(source.startTime) }} → {{ formatTime(source.startTime + source.duration) }}
-          </span>
-        </div>
-        <div class="source-item__actions">
-          <button type="button" class="ghost" (click)="moveSourceUp(source.id)" [disabled]="source.order === 0"
-            title="Move up">
-            ↑
-          </button>
-          <button type="button" class="ghost" (click)="moveSourceDown(source.id)"
-            [disabled]="source.order === sources().length - 1" title="Move down">
-            ↓
-          </button>
-          <button type="button" class="ghost danger" (click)="removeSource(source.id)" title="Remove">
-            Remove
-          </button>
-        </div>
-      </li>
-      }
-    </ul>
-  </section>
+  <app-sources-panel [sources]="sources()" [duration]="duration()" [editingSourceId]="editingSourceId()"
+    (removeSource)="removeSource($event)" (moveSourceUp)="moveSourceUp($event)"
+    (moveSourceDown)="moveSourceDown($event)" (startEditing)="startEditingSource($event)"
+    (cancelEditing)="cancelEditingSource()" (updateDuration)="updateSourceDuration($event.id, $event.duration)" />
   }
 
   @if (errorMessage()) {
@@ -213,22 +126,9 @@
   @if (sourceLoaded()) {
   <!-- Unified Toolbar -->
   @if (duration() > 0) {
-  <div class="editor-toolbar">
-    <button type="button" class="toolbar-btn mode-toggle" (click)="toggleTimelineMode()"
-      [title]="timelineMode() === 'cut' ? 'Switch to Keep Mode' : 'Switch to Cut Mode'">
-      {{ timelineMode() === 'cut' ? '✂️ Cut' : '✅ Keep' }}
-      <span class="toolbar-btn__label">{{ timelineMode() === 'cut' ? 'Mark to Remove' : 'Mark to Keep' }}</span>
-    </button>
-    <button type="button" class="toolbar-btn" (click)="openOverlayForm('text')">
-      ➕ Add Overlay
-    </button>
-    <button type="button" class="toolbar-btn" (click)="openAudioForm()">
-      🎵 Add Audio Track
-    </button>
-    <button type="button" class="toolbar-btn" (click)="openCutForm()">
-      📝 Manual Entry
-    </button>
-  </div>
+  <app-editor-toolbar [timelineMode]="timelineMode()" (modeToggle)="toggleTimelineMode()"
+    (openOverlayForm)="openOverlayForm('text')" (openAudioForm)="openAudioForm()"
+    (openCutForm)="openCutForm()" />
   }
 
   <section class="timeline-shell">
@@ -414,83 +314,15 @@
 
 
 
-  <!-- Cut/Segment Form Modal -->
-  @if (showCutForm()) {
-  <div class="modal-overlay" (click)="closeCutForm()" (keydown.escape)="closeCutForm()" tabindex="0">
-    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeCutForm()" tabindex="0">
-      <div class="cut-form">
-        <div class="cut-form__header">
-          <h3>{{ timelineMode() === 'cut' ? 'Manual Cut Entry' : 'Manual Segment Entry' }}</h3>
-        </div>
-        <p class="cut-form__description">
-          {{ timelineMode() === 'cut' ? 'Mark parts to remove from the video.' : 'Mark parts to keep in the final
-          video.' }}
-        </p>
-        <div class="field-grid">
-          <label>
-            Start (sec)
-            <input type="number" step="1" [min]="0" [max]="duration()"
-              [value]="timelineMode() === 'cut' ? cutSelection().start : segmentSelection().start"
-              (input)="updateCutSelection('start', $event)" />
-          </label>
-          <label>
-            End (sec)
-            <input type="number" step="1" [min]="0" [max]="duration()"
-              [value]="timelineMode() === 'cut' ? cutSelection().end : segmentSelection().end"
-              (input)="updateCutSelection('end', $event)" />
-          </label>
-        </div>
-        <div class="hint">
-          <button type="button" (click)="setCutStartFromCurrent()">Use playhead for start</button>
-          <button type="button" (click)="setCutEndFromCurrent()">Use playhead for end</button>
-          <button type="button" class="primary" (click)="addCut(); closeCutForm()">
-            {{ timelineMode() === 'cut' ? 'Add Cut' : 'Add Segment' }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-  }
+  <app-cut-form [isOpen]="showCutForm()" [timelineMode]="timelineMode()" [duration]="duration()"
+    [currentTime]="currentTime()" [cutStart]="cutSelection().start" [cutEnd]="cutSelection().end"
+    [segmentStart]="segmentSelection().start" [segmentEnd]="segmentSelection().end" (closed)="closeCutForm()"
+    (cutAdded)="addCut()" (segmentAdded)="addSegment()" (startChanged)="onCutStartChanged($event)"
+    (endChanged)="onCutEndChanged($event)" (usePlayheadForStart)="setCutStartFromCurrent()"
+    (usePlayheadForEnd)="setCutEndFromCurrent()" />
 
-  <!-- Audio Form Modal -->
-  @if (showAudioForm()) {
-  <div class="modal-overlay" (click)="closeAudioForm()" (keydown.escape)="closeAudioForm()"
-    (keydown.enter)="closeAudioForm()" tabindex="0">
-    <div class="modal-content" (click)="$event.stopPropagation()" (keydown.enter)="closeAudioForm()" tabindex="0">
-      <div class="audio-form">
-        <div class="audio-form__header">
-          <h3>Add Audio Track</h3>
-        </div>
-        <div class="field-grid">
-          <label>
-            Audio URL
-            <div class="unified-input-wrapper" [class.drag-over]="isDraggingAudio()"
-              (dragover)="onAudioDragOver($event)" (dragleave)="onAudioDragLeave($event)" (drop)="onAudioDrop($event)">
-              <div class="input-container">
-                <input type="url" id="audioUrl" placeholder="Enter URL or drag & drop files here"
-                  (input)="updateHasValueClass($event)" />
-                <button type="button" class="file-picker-icon-btn" (click)="openAudioFilePicker($event)"
-                  (keydown.enter)="openAudioFilePicker($event)" title="Browse files">
-                  📁
-                </button>
-              </div>
-              <input type="file" #audioFileInput accept=".mp3,.wav,.ogg,.aac,.m4a"
-                (change)="onAudioFileSelected($event)" style="display: none;" />
-            </div>
-          </label>
-          <label>
-            Start Time (sec)
-            <input type="number" id="audioStart" step="1" [value]="currentTime()" [min]="0" [max]="duration()" />
-          </label>
-        </div>
-        <div class="hint">
-          <button type="button" (click)="closeAudioForm()">Cancel</button>
-          <button type="button" class="primary" (click)="addAudioSource()">Add Audio</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  }
+  <app-audio-form [isOpen]="showAudioForm()" [currentTime]="currentTime()" [duration]="duration()"
+    (closed)="closeAudioForm()" (audioAdded)="onAudioAdded($event)" (fileSelected)="onAudioFileSelected($event)" />
 
   <!-- Overlay Form Modal -->
   @if (showOverlayForm()) {
@@ -777,37 +609,7 @@
   }
 
   @if (duration() > 0) {
-  <section class="server-panel">
-    <div>
-      <h2>Server Render (FFmpeg)</h2>
-      <p>
-        Send the current trim/cut plan to the Node backend. The server downloads from the provided
-        URL, cuts the requested keep segments, concatenates them, and writes a new file without
-        mutating the original.
-      </p>
-    </div>
-    <div class="server-panel__actions">
-      <button type="button" class="primary" [disabled]="!canRender() || renderBusy()" (click)="renderViaBackend()">
-        {{ renderBusy() ? 'Rendering…' : 'Send to backend' }}
-      </button>
-      @if (renderResult()) {
-      <div class="render-result">
-        <p class="render-result__info">
-          Job {{ renderResult()?.jobId }} ready
-        </p>
-        @if (renderDownloadUrl()) {
-        <div class="render-result__player">
-          <video #renderedVideo [src]="renderDownloadUrl() || undefined" controls class="render-result__video"></video>
-        </div>
-        }
-        <a class="download-link" [href]="renderDownloadUrl() || undefined" download target="_blank" rel="noopener">
-          Download output
-        </a>
-      </div>
-      } @else {
-      <p class="muted">No server job yet.</p>
-      }
-    </div>
-  </section>
+  <app-render-panel [canRender]="canRender()" [renderBusy]="renderBusy()" [renderResult]="renderResult()"
+    [exportPlan]="exportPlan()" [downloadUrl]="renderDownloadUrl()" (renderRequested)="renderViaBackend()" />
   }
 </section>

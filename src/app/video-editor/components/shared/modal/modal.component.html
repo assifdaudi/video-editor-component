@@ -1,0 +1,18 @@
+@if (isOpen) {
+<div class="modal-overlay" (click)="onBackdropClick()" (keydown)="onKeyDown($event)" tabindex="0">
+  <div class="modal-content" (click)="onContentClick($event)" (keydown.enter)="onClose()" tabindex="0">
+    @if (showCloseButton) {
+    <button type="button" class="modal-close-btn" (click)="onClose()" (keydown.enter)="onClose()" title="Close">
+      ✕
+    </button>
+    }
+    @if (title) {
+    <div class="modal-header">
+      <h3>{{ title }}</h3>
+    </div>
+    }
+    <ng-content></ng-content>
+  </div>
+</div>
+}
+

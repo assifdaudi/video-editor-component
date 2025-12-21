@@ -1,0 +1,18 @@
+<form class="source-form" [formGroup]="sourceForm" (ngSubmit)="onSubmit()">
+  <label for="sourceUrl">
+    Source URL (Video or Image)
+    <app-file-input type="source" accept=".mp4,.m4v,.mpd,.jpg,.jpeg,.png,.gif,.webp"
+      inputId="sourceUrl" formControlName="sourceUrl" placeholder="Enter URL or drag & drop files here"
+      (fileSelected)="onFileSelected($event)" (dragStateChange)="onDragStateChange($event)" />
+  </label>
+  @if (isImageUrl()) {
+  <label for="imageDuration" class="image-duration-field">
+    Image Duration (seconds)
+    <input id="imageDuration" formControlName="imageDuration" type="number" step="1" min="0.1" max="60" placeholder="5" />
+  </label>
+  }
+  <button type="submit" [disabled]="sourceForm.invalid || loading">
+    {{ loading ? 'Adding…' : 'Add to Timeline' }}
+  </button>
+</form>
+

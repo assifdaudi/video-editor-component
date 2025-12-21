@@ -1,0 +1,17 @@
+<div class="editor-toolbar">
+  <button type="button" class="toolbar-btn mode-toggle" (click)="onModeToggle()"
+    [title]="timelineMode === 'cut' ? 'Switch to Keep Mode' : 'Switch to Cut Mode'">
+    {{ timelineMode === 'cut' ? '✂️ Cut' : '✅ Keep' }}
+    <span class="toolbar-btn__label">{{ timelineMode === 'cut' ? 'Mark to Remove' : 'Mark to Keep' }}</span>
+  </button>
+  <button type="button" class="toolbar-btn" (click)="onOpenOverlayForm()">
+    ➕ Add Overlay
+  </button>
+  <button type="button" class="toolbar-btn" (click)="onOpenAudioForm()">
+    🎵 Add Audio Track
+  </button>
+  <button type="button" class="toolbar-btn" (click)="onOpenCutForm()">
+    📝 Manual Entry
+  </button>
+</div>
+
