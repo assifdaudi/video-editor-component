@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { VideoEditorComponent } from './video-editor/video-editor.component';
+import { VideoEditorComponent } from '@assifdaudi/video-editor-lib';
 
 @Component({
   selector: 'app-root',

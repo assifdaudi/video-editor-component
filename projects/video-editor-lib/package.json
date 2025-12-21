@@ -1,0 +1,34 @@
+{
+  "name": "@assifdaudi/video-editor-lib",
+  "version": "1.0.3",
+  "description": "Angular video editor component library with timeline editing, overlays, audio mixing, and server-side rendering",
+  "keywords": [
+    "angular",
+    "video",
+    "editor",
+    "ffmpeg",
+    "video-editing",
+    "timeline",
+    "overlay",
+    "audio-mixing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "peerDependencies": {
+    "@angular/common": "^21.0.0",
+    "@angular/core": "^21.0.0",
+    "@angular/forms": "^21.0.0",
+    "rxjs": "~7.8.0"
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  },
+  "sideEffects": false,
+  "main": "./fesm2022/assifdaudi-video-editor-lib.mjs",
+  "types": "./types/assifdaudi-video-editor-lib.d.ts"
+}
+

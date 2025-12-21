@@ -4,7 +4,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/app",
-    "types": []
+    "types": [],
+    "paths": {
+      "@video-editor/video-editor-lib": [
+        "./projects/video-editor-lib/src/public-api.ts"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts"

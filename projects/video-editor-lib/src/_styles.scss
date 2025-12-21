@@ -1,0 +1,16 @@
+// Video Editor Library Component Styles
+// This file imports all component styles for explicit inclusion
+
+// Main component styles
+@import './lib/video-editor/video-editor.component.scss';
+
+// Child component styles
+@import './lib/video-editor/components/source-form/source-form.component.scss';
+@import './lib/video-editor/components/sources-panel/sources-panel.component.scss';
+@import './lib/video-editor/components/editor-toolbar/editor-toolbar.component.scss';
+@import './lib/video-editor/components/audio-form/audio-form.component.scss';
+@import './lib/video-editor/components/cut-form/cut-form.component.scss';
+@import './lib/video-editor/components/render-panel/render-panel.component.scss';
+@import './lib/video-editor/components/shared/file-input/file-input.component.scss';
+@import './lib/video-editor/components/shared/modal/modal.component.scss';
+

@@ -7,6 +7,44 @@
   },
   "newProjectRoot": "projects",
   "projects": {
+    "video-editor-lib": {
+      "projectType": "library",
+      "root": "projects/video-editor-lib",
+      "sourceRoot": "projects/video-editor-lib/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "options": {
+            "project": "projects/video-editor-lib/ng-package.json"
+          },
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/video-editor-lib/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/video-editor-lib/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/video-editor-lib/tsconfig.spec.json"
+          }
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "projects/video-editor-lib/**/*.ts",
+              "projects/video-editor-lib/**/*.html"
+            ]
+          }
+        }
+      }
+    },
     "video-editor": {
       "projectType": "application",
       "schematics": {

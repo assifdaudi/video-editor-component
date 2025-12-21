@@ -1,0 +1,44 @@
+/* 
+ * Video Editor Library Styles
+ * 
+ * Import this file in your application's styles to get all CSS variables and base styles.
+ * 
+ * Usage in your app's styles.scss:
+ * @import '@assifdaudi/video-editor-lib/styles';
+ * 
+ * Or in angular.json:
+ * "styles": [
+ *   "node_modules/@assifdaudi/video-editor-lib/styles.scss"
+ * ]
+ */
+
+// Import Google Fonts
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+// CSS Variables - Required for the component to work properly
+:root {
+  --bg: #000000;
+  --bg-secondary: #0a0a0a;
+  --panel-gradient: #1a1a1a;
+  --player-gradient: #0a0a0a;
+  --card-glass: rgba(20, 20, 20, 0.85);
+  --border-muted: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-on-panel: #ffffff;
+  --text-quiet: rgba(255, 255, 255, 0.85);
+  --text-muted: rgba(255, 255, 255, 0.5);
+  --accent: #ef4444;
+  --accent-hover: #dc2626;
+  --success: #22c55e;
+  --danger: #f87171;
+}
+
+// Base styles (optional but recommended)
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+// Note: Component styles are automatically embedded in the JavaScript bundle.
+// This file only provides the CSS variables that the components depend on.

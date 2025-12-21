@@ -28,6 +28,9 @@
     },
     {
       "path": "./tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/video-editor-lib/tsconfig.lib.json"
     }
   ]
 }

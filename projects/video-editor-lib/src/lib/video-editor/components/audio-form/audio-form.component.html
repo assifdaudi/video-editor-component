@@ -1,0 +1,22 @@
+<app-modal [isOpen]="isOpen" title="Add Audio Track" (closed)="onClose()">
+  <div class="audio-form">
+    <div class="field-grid">
+      <label for="audioUrl">
+        Audio URL
+        <app-file-input type="audio" accept=".mp3,.wav,.ogg,.aac,.m4a" inputId="audioUrl"
+          placeholder="Enter URL or drag & drop files here" [(ngModel)]="audioUrl"
+          (fileSelected)="onFileSelected($event)" (dragStateChange)="onDragStateChange($event)" />
+      </label>
+      <label for="audioStart">
+        Start Time (sec)
+        <input id="audioStart" type="number" step="1" [min]="0" [max]="duration" [value]="audioStart()"
+          (input)="onStartTimeChange($event)" />
+      </label>
+    </div>
+    <div class="hint">
+      <button type="button" (click)="onClose()">Cancel</button>
+      <button type="button" class="primary" (click)="onSubmit()" [disabled]="!audioUrl">Add Audio</button>
+    </div>
+  </div>
+</app-modal>
+
