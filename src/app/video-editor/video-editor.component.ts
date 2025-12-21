@@ -10,6 +10,7 @@ import {
   signal
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { ReactiveFormsModule, Validators, FormBuilder } from '@angular/forms';
 import * as dashjs from 'dashjs';
 import { environment } from '../../environments/environment';
@@ -45,6 +46,9 @@ export class VideoEditorComponent implements OnDestroy {
   @ViewChild('videoEl', { static: true }) private videoElement?: ElementRef<HTMLVideoElement>;
   @ViewChild('overlayFormContainer', { static: false }) private overlayFormContainer?: ElementRef<HTMLElement>;
   @ViewChild('playerContainer', { static: false }) private playerContainer?: ElementRef<HTMLElement>;
+  @ViewChild('sourceFileInput', { static: false }) private sourceFileInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('audioFileInput', { static: false }) private audioFileInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('imageFileInput', { static: false }) private imageFileInput?: ElementRef<HTMLInputElement>;
 
   // Private fields (dependencies that must be declared first)
   private readonly fb = inject(FormBuilder);
@@ -85,6 +89,11 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly renderResult = signal<RenderResponse | null>(null);
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   protected readonly resizingOverlay = signal<{ overlay: Overlay; startWidth: number; startHeight: number; startX: number; startY: number; corner: 'se' | 'sw' | 'ne' | 'nw' } | null>(null);
+  
+  // Drag and drop state
+  protected readonly isDraggingSource = signal(false);
+  protected readonly isDraggingAudio = signal(false);
+  protected readonly isDraggingImage = signal(false);
 
   // Service signals (delegated)
   protected readonly sources = this.playerService.getSources();
@@ -1929,6 +1938,374 @@ export class VideoEditorComponent implements OnDestroy {
     this.initializeAudioPlayback();
     this.cancelEditingAudio();
     this.errorMessage.set('');
+  }
+
+  // File upload and drag-and-drop methods
+  /**
+   * Upload a file to the server
+   */
+  protected async uploadFile(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const response = await firstValueFrom(
+        this.http.post<{ success: boolean; url: string }>(
+          `${this.backendHost}/api/upload`,
+          formData
+        )
+      );
+      
+      if (!response || !response.success || !response.url) {
+        throw new Error('Upload failed: Invalid response');
+      }
+      
+      // Return full URL
+      return `${this.backendHost}${response.url}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      this.errorMessage.set(`Failed to upload file: ${message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle source file selection
+   */
+  protected async onSourceFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleSourceFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle source file (upload and set URL)
+   */
+  protected async handleSourceFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      const url = await this.uploadFile(file);
+      this.sourceForm.controls.sourceUrl.setValue(url);
+    } catch (error) {
+      console.error('Failed to handle source file:', error);
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle source drag over
+   */
+  protected onSourceDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.isValidSourceFile(event.dataTransfer)) {
+      this.isDraggingSource.set(true);
+    }
+  }
+
+  /**
+   * Handle source drag leave
+   */
+  protected onSourceDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingSource.set(false);
+  }
+
+  /**
+   * Handle source drop
+   */
+  protected async onSourceDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingSource.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidSourceFile(event.dataTransfer)) {
+      await this.handleSourceFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid source file
+   */
+  protected isValidSourceFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.mp4', '.m4v', '.mpd', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Handle audio file selection
+   */
+  protected async onAudioFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleAudioFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle audio file (upload and set URL)
+   */
+  protected async handleAudioFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      const url = await this.uploadFile(file);
+      const audioUrlInput = document.getElementById('audioUrl') as HTMLInputElement;
+      if (audioUrlInput) {
+        audioUrlInput.value = url;
+        // Update has-value class
+        const wrapper = audioUrlInput.closest('.unified-input-wrapper');
+        if (wrapper) {
+          wrapper.classList.toggle('has-value', !!url);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle audio file:', error);
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle audio drag over
+   */
+  protected onAudioDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.isValidAudioFile(event.dataTransfer)) {
+      this.isDraggingAudio.set(true);
+    }
+  }
+
+  /**
+   * Handle audio drag leave
+   */
+  protected onAudioDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingAudio.set(false);
+  }
+
+  /**
+   * Handle audio drop
+   */
+  protected async onAudioDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingAudio.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidAudioFile(event.dataTransfer)) {
+      await this.handleAudioFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid audio file
+   */
+  protected isValidAudioFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.mp3', '.wav', '.ogg', '.aac', '.m4a'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Handle image file selection
+   */
+  protected async onImageFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    
+    await this.handleImageFile(file);
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * Handle image file (upload and set URL)
+   */
+  protected async handleImageFile(file: File): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set('');
+    
+    try {
+      const url = await this.uploadFile(file);
+      const imageUrlInput = document.getElementById('imageUrl') as HTMLInputElement;
+      if (imageUrlInput) {
+        imageUrlInput.value = url;
+        // Update has-value class
+        const wrapper = imageUrlInput.closest('.unified-input-wrapper');
+        if (wrapper) {
+          wrapper.classList.toggle('has-value', !!url);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle image file:', error);
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Handle image drag over
+   */
+  protected onImageDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.isValidImageFile(event.dataTransfer)) {
+      this.isDraggingImage.set(true);
+    }
+  }
+
+  /**
+   * Handle image drag leave
+   */
+  protected onImageDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingImage.set(false);
+  }
+
+  /**
+   * Handle image drop
+   */
+  protected async onImageDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingImage.set(false);
+    
+    const file = event.dataTransfer?.files[0];
+    if (file && this.isValidImageFile(event.dataTransfer)) {
+      await this.handleImageFile(file);
+    }
+  }
+
+  /**
+   * Check if dragged file is a valid image file
+   */
+  protected isValidImageFile(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    
+    const items = Array.from(dataTransfer.items);
+    if (items.length === 0) return false;
+    
+    const item = items[0];
+    if (item.kind !== 'file') return false;
+    
+    const file = item.getAsFile();
+    if (!file) return false;
+    
+    const name = file.name.toLowerCase();
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    return validExtensions.some(ext => name.endsWith(ext));
+  }
+
+  /**
+   * Update has-value class on input wrapper
+   */
+  protected updateHasValueClass(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const wrapper = input.closest('.unified-input-wrapper');
+    if (wrapper) {
+      wrapper.classList.toggle('has-value', !!input.value);
+    }
+  }
+
+  /**
+   * Open file picker for source
+   */
+  protected openSourceFilePicker(event?: Event): void {
+    if (event) {
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback to ViewChild
+    if (this.sourceFileInput?.nativeElement) {
+      this.sourceFileInput.nativeElement.click();
+    }
+  }
+
+  /**
+   * Open file picker for audio
+   */
+  protected openAudioFilePicker(event?: Event): void {
+    if (event) {
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback to ViewChild
+    if (this.audioFileInput?.nativeElement) {
+      this.audioFileInput.nativeElement.click();
+    }
+  }
+
+  /**
+   * Open file picker for image overlay
+   */
+  protected openImageFilePicker(event?: Event): void {
+    if (event) {
+      const wrapper = (event.target as HTMLElement).closest('.unified-input-wrapper');
+      if (wrapper) {
+        const fileInput = wrapper.querySelector('input[type="file"]') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.click();
+          return;
+        }
+      }
+    }
+    // Fallback to ViewChild
+    if (this.imageFileInput?.nativeElement) {
+      this.imageFileInput.nativeElement.click();
+    }
   }
 
   // Private methods

@@ -2,8 +2,24 @@
   <form class="source-form" [formGroup]="sourceForm" (ngSubmit)="addSource()">
     <label>
       Source URL (Video or Image)
-      <input formControlName="sourceUrl" type="url" placeholder="https://example.com/video.mp4 or image.jpg"
-        [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched" />
+      <div class="unified-input-wrapper" 
+        [class.drag-over]="isDraggingSource()"
+        [class.has-value]="sourceForm.controls.sourceUrl.value"
+        (dragover)="onSourceDragOver($event)"
+        (dragleave)="onSourceDragLeave($event)"
+        (drop)="onSourceDrop($event)"
+        (click)="openSourceFilePicker()">
+        <input formControlName="sourceUrl" type="url" 
+          placeholder="Enter URL or click/drag to upload file"
+          [class.invalid]="sourceForm.controls.sourceUrl.invalid && sourceForm.touched"
+          (click)="$event.stopPropagation()"
+          (focus)="$event.stopPropagation()" />
+        <input type="file" #sourceFileInput accept=".mp4,.m4v,.mpd,.jpg,.jpeg,.png,.gif,.webp" 
+          (change)="onSourceFileSelected($event)" style="display: none;" />
+        <div class="input-overlay">
+          <span class="input-hint">📎 Click to browse or drag & drop files here</span>
+        </div>
+      </div>
     </label>
     @if (isImageUrl()) {
     <label class="image-duration-field">
@@ -451,7 +467,23 @@
         <div class="field-grid">
           <label>
             Audio URL
-            <input type="url" id="audioUrl" placeholder="https://example.com/audio.mp3" />
+            <div class="unified-input-wrapper" 
+              [class.drag-over]="isDraggingAudio()"
+              (dragover)="onAudioDragOver($event)"
+              (dragleave)="onAudioDragLeave($event)"
+              (drop)="onAudioDrop($event)"
+              (click)="openAudioFilePicker()">
+              <input type="url" id="audioUrl" 
+                placeholder="Enter URL or click/drag to upload file"
+                (click)="$event.stopPropagation()"
+                (focus)="$event.stopPropagation()"
+                (input)="updateHasValueClass($event)" />
+              <input type="file" #audioFileInput accept=".mp3,.wav,.ogg,.aac,.m4a" 
+                (change)="onAudioFileSelected($event)" style="display: none;" />
+              <div class="input-overlay">
+                <span class="input-hint">📎 Click to browse or drag & drop files here</span>
+              </div>
+            </div>
           </label>
           <label>
             Start Time (sec)
@@ -541,7 +573,23 @@
         <div class="field-grid">
           <label>
             Image URL
-            <input type="url" id="imageUrl" placeholder="https://example.com/image.png" />
+            <div class="unified-input-wrapper" 
+              [class.drag-over]="isDraggingImage()"
+              (dragover)="onImageDragOver($event)"
+              (dragleave)="onImageDragLeave($event)"
+              (drop)="onImageDrop($event)"
+              (click)="openImageFilePicker()">
+              <input type="url" id="imageUrl" 
+                placeholder="Enter URL or click/drag to upload file"
+                (click)="$event.stopPropagation()"
+                (focus)="$event.stopPropagation()"
+                (input)="updateHasValueClass($event)" />
+              <input type="file" #imageFileInput accept=".jpg,.jpeg,.png,.gif,.webp" 
+                (change)="onImageFileSelected($event)" style="display: none;" />
+              <div class="input-overlay">
+                <span class="input-hint">📎 Click to browse or drag & drop files here</span>
+              </div>
+            </div>
           </label>
           <label>
             Start (sec)
