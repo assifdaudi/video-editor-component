@@ -561,7 +561,17 @@ async function finalRender(
       }
     } else {
       // No additional audio - use video audio if available
-      audioStreams.push('[0:a]');
+      // If we have video filters (overlays), we need to pass audio through the filter graph
+      // Otherwise, we can map directly
+      if (needsVideoFilter) {
+        // Pass audio through filter graph when we have video filters
+        // This ensures [0:a] is part of the filter graph and can be mapped
+        filterParts.push(`[0:a]anull[audioout]`);
+        audioStreams.push('[audioout]');
+      } else {
+        // No video filters, can map audio directly
+        audioStreams.push('[0:a]');
+      }
     }
 
     // If we have audio filters but no video filter, we need to add a passthrough for video

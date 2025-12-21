@@ -158,24 +158,74 @@ You can override the CSS variables after importing:
 }
 ```
 
-### 3. Configure API Base URL
+### 3. Configure Backend API URL (Required for Rendering)
 
-The component requires a backend server for rendering. Configure the API base URL using Angular's dependency injection:
+**The component requires a backend server for video rendering. You must provide the API base URL.**
+
+The library uses Angular's dependency injection. Provide the `VIDEO_EDITOR_API_BASE_URL` token in your app configuration:
+
+**Option A: In `app.config.ts` (Standalone App - Recommended)**
 
 ```typescript
-import { provideHttpClient } from '@angular/common/http';
+// app.config.ts
+import { ApplicationConfig, provideHttpClient } from '@angular/common/http';
 import { VIDEO_EDITOR_API_BASE_URL } from '@assifdaudi/video-editor-lib';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(), // Required for HTTP requests
+    {
+      provide: VIDEO_EDITOR_API_BASE_URL,
+      useValue: 'http://localhost:4000' // Your backend server URL (without /api)
+    }
+  ]
+};
+```
+
+**Option B: Using Environment Variables**
+
+```typescript
+// app.config.ts
+import { ApplicationConfig, provideHttpClient } from '@angular/common/http';
+import { VIDEO_EDITOR_API_BASE_URL } from '@assifdaudi/video-editor-lib';
+import { environment } from './environments/environment';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideHttpClient(),
     {
       provide: VIDEO_EDITOR_API_BASE_URL,
-      useValue: 'http://localhost:3000/api' // Your backend API URL
+      useValue: environment.apiBaseUrl // e.g., 'https://api.yoursite.com'
     }
   ]
 };
 ```
+
+**Option C: In `app.module.ts` (NgModule App)**
+
+```typescript
+// app.module.ts
+import { NgModule } from '@angular/core';
+import { HttpClientModule } from '@angular/common/http';
+import { VIDEO_EDITOR_API_BASE_URL } from '@assifdaudi/video-editor-lib';
+
+@NgModule({
+  imports: [HttpClientModule],
+  providers: [
+    {
+      provide: VIDEO_EDITOR_API_BASE_URL,
+      useValue: 'http://localhost:4000' // Your backend server URL
+    }
+  ]
+})
+export class AppModule {}
+```
+
+**Important Notes:**
+- The URL should be the base URL of your backend server (e.g., `http://localhost:4000` or `https://api.example.com`)
+- Do NOT include `/api` in the base URL - the library appends `/api/upload`, `/api/render`, etc.
+- The default value is `http://localhost:4000` if not provided
+- You must also provide `HttpClient` (via `provideHttpClient()` or `HttpClientModule`)
 
 ### 4. Set Up Backend Server
 
