@@ -26,10 +26,10 @@ import {
   AudioTimelineDrag
 } from './video-editor.types';
 import { formatTime, clamp } from './video-editor.utils';
-import { 
-  RenderService, 
-  VideoPlayerService, 
-  OverlayService, 
+import {
+  RenderService,
+  VideoPlayerService,
+  OverlayService,
   TimelineService,
   AudioService
 } from './services';
@@ -87,7 +87,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly renderResult = signal<RenderResponse | null>(null);
   protected readonly draggingOverlay = signal<{ overlay: Overlay; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   protected readonly resizingOverlay = signal<{ overlay: Overlay; startWidth: number; startHeight: number; startX: number; startY: number; corner: 'se' | 'sw' | 'ne' | 'nw' } | null>(null);
-  
+
   // Drag and drop state
   protected readonly isDraggingSource = signal(false);
   protected readonly isDraggingAudio = signal(false);
@@ -105,14 +105,14 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly sources = this.playerService.getSources();
   protected readonly duration = this.playerService.getDuration();
   protected readonly currentTime = this.playerService.getCurrentTime();
-  
+
   // Computed playhead position (uses preview time during drag for smooth movement)
   protected readonly playheadTime = computed(() => {
     return this.previewTime() !== null ? this.previewTime()! : this.currentTime();
   });
   protected readonly sourceLoaded = this.playerService.getSourceLoaded();
   protected readonly currentSourceIndex = this.playerService.getCurrentSourceIndex();
-  
+
   protected readonly trimStart = this.timelineService.getTrimStart();
   protected readonly trimEnd = this.timelineService.getTrimEnd();
   // Use computed signals for display to ensure proper change detection
@@ -128,7 +128,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected readonly hasCuts = this.timelineService.getHasCuts();
   protected readonly hasSegments = this.timelineService.getHasSegments();
   protected readonly timelineMode = this.timelineService.getMode();
-  
+
   protected readonly overlays = this.overlayService.getOverlays();
   protected readonly overlaySelection = this.overlayService.getSelectedOverlay();
 
@@ -222,15 +222,15 @@ export class VideoEditorComponent implements OnDestroy {
   ngOnDestroy(): void {
     // Clean up video player service
     this.playerService.cleanup();
-    
+
     // Clean up audio elements
     this.cleanupAudioElements();
-    
+
     // Clean up audio playback interval
     if (this.audioPlaybackInterval) {
       clearInterval(this.audioPlaybackInterval);
     }
-    
+
     // Clean up keyboard listener
     if (this.keyboardListener) {
       window.removeEventListener('keydown', this.keyboardListener);
@@ -279,15 +279,15 @@ export class VideoEditorComponent implements OnDestroy {
       const currentSources = this.sources();
       const hasExistingMpd = currentSources.some(s => s.type === 'video' && s.url.toLowerCase().endsWith('.mpd'));
       const hasExistingMp4 = currentSources.some(s => s.type === 'video' && !s.url.toLowerCase().endsWith('.mpd'));
-      
+
       // Check if we're about to mix formats
       const wouldMixFormats = (isMpd && hasExistingMp4) || (!isMpd && hasExistingMpd);
-      
+
       if (wouldMixFormats && currentSources.length > 0) {
         // Show confirmation dialog
         const sourceType = isMpd ? 'MPD' : 'MP4';
         const existingType = hasExistingMpd ? 'MPD' : 'MP4';
-        
+
         const confirmed = confirm(
           '⚠️ Quality Warning\n\n' +
           `You are about to add an ${sourceType} source to a timeline that already contains ${existingType} sources.\n\n` +
@@ -295,7 +295,7 @@ export class VideoEditorComponent implements OnDestroy {
           'For best quality, use sources of the same format (all MPD or all MP4).\n\n' +
           'Do you want to continue anyway?'
         );
-        
+
         if (!confirmed) {
           return; // User cancelled
         }
@@ -308,11 +308,11 @@ export class VideoEditorComponent implements OnDestroy {
     try {
       // Get duration of the source
       let duration = 5; // Default 5 seconds for images
-      
+
       if (type === 'video') {
         // Load video metadata to get duration
         duration = await this.getVideoDuration(url);
-        
+
         // Validate duration
         if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
           throw new Error(`Invalid duration (${duration}) for video: ${url}`);
@@ -337,7 +337,7 @@ export class VideoEditorComponent implements OnDestroy {
       this.sources.update(sources => [...sources, newSource]);
       this.updateSourceBoundaries();
       this.sourceForm.reset();
-      
+
       // Load the concatenated sources for preview
       this.loadConcatenatedSources();
     } catch (error) {
@@ -357,9 +357,9 @@ export class VideoEditorComponent implements OnDestroy {
       // Re-calculate start times and order
       return this.recalculateSourceTimings(filtered);
     });
-    
+
     this.updateSourceBoundaries();
-    
+
     // Reload if we still have sources
     if (this.sources().length > 0) {
       this.loadConcatenatedSources();
@@ -374,7 +374,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected moveSourceUp(id: number): void {
     const currentSources = this.sources();
     const index = currentSources.findIndex(s => s.id === id);
-    
+
     if (index > 0) {
       const newSources = [...currentSources];
       [newSources[index - 1], newSources[index]] = [newSources[index], newSources[index - 1]];
@@ -392,7 +392,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected moveSourceDown(id: number): void {
     const currentSources = this.sources();
     const index = currentSources.findIndex(s => s.id === id);
-    
+
     if (index < currentSources.length - 1) {
       const newSources = [...currentSources];
       [newSources[index], newSources[index + 1]] = [newSources[index + 1], newSources[index]];
@@ -416,14 +416,14 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected updateSourceDuration(id: number, newDuration: number): void {
     const validDuration = Math.max(0.1, Math.min(60, newDuration));
-    
+
     this.sources.update(sources => {
-      const updated = sources.map(s => 
+      const updated = sources.map(s =>
         s.id === id ? { ...s, duration: validDuration } : s
       );
       return this.recalculateSourceTimings(updated);
     });
-    
+
     this.updateSourceBoundaries();
     this.editingSourceId.set(null);
     this.loadConcatenatedSources();
@@ -448,34 +448,34 @@ export class VideoEditorComponent implements OnDestroy {
 
     // Calculate total duration
     const totalDuration = allSources.reduce((sum, s) => sum + s.duration, 0);
-    
+
     // Validate total duration
     if (isNaN(totalDuration) || !isFinite(totalDuration) || totalDuration <= 0) {
       this.errorMessage.set(`Invalid total duration (${totalDuration}). One or more sources have invalid durations. Please remove and re-add the sources.`);
       return;
     }
-    
+
     // Reset services
     this.timelineService.reset();
     this.overlayService.clearAll();
     this.renderResult.set(null);
-    
+
     // Set trim range to full duration
     this.timelineService.setTrimStart(0, totalDuration);
     this.timelineService.setTrimEnd(totalDuration, totalDuration);
-    
+
     // Set cut and segment selection defaults
     const defaultStart = Math.min(totalDuration * 0.25, totalDuration - 0.1);
     const defaultEnd = Math.min(totalDuration * 0.4, totalDuration);
     this.timelineService.setCutSelection(defaultStart, defaultEnd);
     this.timelineService.setSegmentSelection(defaultStart, defaultEnd);
-    
+
     // Initialize player with video element if not already done
     const video = this.videoElement?.nativeElement;
     if (video) {
       this.playerService.initialize(video);
     }
-    
+
     // Load sources into player
     this.playerService.loadSources(allSources);
     this.playerService.setDuration(totalDuration);
@@ -733,7 +733,7 @@ export class VideoEditorComponent implements OnDestroy {
       this.trimStart(),
       this.trimEnd() - this.minGap
     );
-    
+
     if (this.timelineMode() === 'keep') {
       const nextEnd = Math.max(start + this.minGap, this.segmentSelection().end);
       this.timelineService.setSegmentSelection(
@@ -751,7 +751,7 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected setCutEndFromCurrent(): void {
     const currentTime = this.currentTime();
-    
+
     if (this.timelineMode() === 'keep') {
       const start = this.segmentSelection().start;
       this.timelineService.setSegmentSelection(
@@ -769,7 +769,7 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected updateCutSelection(field: 'start' | 'end', event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
-    
+
     if (this.timelineMode() === 'keep') {
       const current = this.segmentSelection();
       const next = { ...current };
@@ -841,14 +841,14 @@ export class VideoEditorComponent implements OnDestroy {
     // Get the cut before deleting to check selection
     const cut = this.cutsRaw().find(c => c.id === id);
     const selection = this.cutSelection();
-    
+
     this.timelineService.deleteCut(id);
-    
+
     // Clear selection if the deleted cut was selected
     if (cut && selection.start === cut.start && selection.end === cut.end) {
       this.timelineService.setCutSelection(0, 0);
     }
-    
+
     // Adjust audio positions
     this.adjustAudioForCuts();
   }
@@ -857,14 +857,14 @@ export class VideoEditorComponent implements OnDestroy {
     // Get the segment before deleting to check selection
     const segment = this.segmentsRaw().find(s => s.id === id);
     const selection = this.segmentSelection();
-    
+
     this.timelineService.deleteSegment(id);
-    
+
     // Clear selection if the deleted segment was selected
     if (segment && selection.start === segment.start && selection.end === segment.end) {
       this.timelineService.setSegmentSelection(0, 0);
     }
-    
+
     // Adjust audio positions
     this.adjustAudioForCuts();
   }
@@ -1030,12 +1030,12 @@ export class VideoEditorComponent implements OnDestroy {
     const drag = this.timelineDrag;
     target.releasePointerCapture(drag.pointerId);
     const selection = this.timelineSelection();
-    
+
     // If we were dragging the playhead, seek to the final position
     if (drag.mode === 'playhead' && this.previewTime() !== null) {
       this.jumpTo(this.previewTime()!);
     }
-    
+
     this.timelineDrag = null;
     this.previewTime.set(null);
 
@@ -1143,7 +1143,7 @@ export class VideoEditorComponent implements OnDestroy {
     const opacity = Number(opacityInput.value) || 1;
 
     this.addImageOverlay(imageUrl, start, end, x, y, width, height, opacity);
-    
+
     // Update the x/y inputs to reflect the overlay position (will be updated when dragged)
     setTimeout(() => {
       const overlay = this.overlays().find(o => o.type === 'image' && o.start === start);
@@ -1282,10 +1282,10 @@ export class VideoEditorComponent implements OnDestroy {
   protected getOverlayLeftInContainer(overlay: Overlay): number {
     const bounds = this.getActualVideoBounds();
     if (!bounds) return overlay.x;
-    
+
     const container = this.playerContainer?.nativeElement;
     if (!container) return overlay.x;
-    
+
     const containerRect = container.getBoundingClientRect();
     // Convert video percentage to container percentage
     return ((bounds.x + (overlay.x / 100) * bounds.width) / containerRect.width) * 100;
@@ -1294,10 +1294,10 @@ export class VideoEditorComponent implements OnDestroy {
   protected getOverlayTopInContainer(overlay: Overlay): number {
     const bounds = this.getActualVideoBounds();
     if (!bounds) return overlay.y;
-    
+
     const container = this.playerContainer?.nativeElement;
     if (!container) return overlay.y;
-    
+
     const containerRect = container.getBoundingClientRect();
     // Convert video percentage to container percentage
     return ((bounds.y + (overlay.y / 100) * bounds.height) / containerRect.height) * 100;
@@ -1305,43 +1305,43 @@ export class VideoEditorComponent implements OnDestroy {
 
   protected getOverlayWidthInContainer(overlay: Overlay): number {
     if (overlay.type === 'text') return 0;
-    
+
     const bounds = this.getActualVideoBounds();
     if (!bounds) return 0;
-    
+
     const container = this.playerContainer?.nativeElement;
     if (!container) return 0;
-    
+
     // Get width in pixels from overlay
     const widthPixels = overlay.type === 'image' ? (overlay.width || 200) : (overlay.width || 200);
-    
+
     // Convert pixels to container percentage
     // widthPixels is relative to video dimensions, we need to scale it to container
     const containerRect = container.getBoundingClientRect();
     const scaleFactor = bounds.width / (this.videoElement?.nativeElement?.videoWidth || 1920);
     const widthInContainer = widthPixels * scaleFactor;
-    
+
     return (widthInContainer / containerRect.width) * 100;
   }
 
   protected getOverlayHeightInContainer(overlay: Overlay): number {
     if (overlay.type === 'text') return 0;
-    
+
     const bounds = this.getActualVideoBounds();
     if (!bounds) return 0;
-    
+
     const container = this.playerContainer?.nativeElement;
     if (!container) return 0;
-    
+
     // Get height in pixels from overlay
     const heightPixels = overlay.type === 'image' ? (overlay.height || 200) : (overlay.height || 200);
-    
+
     // Convert pixels to container percentage
     // heightPixels is relative to video dimensions, we need to scale it to container
     const containerRect = container.getBoundingClientRect();
     const scaleFactor = bounds.height / (this.videoElement?.nativeElement?.videoHeight || 1080);
     const heightInContainer = heightPixels * scaleFactor;
-    
+
     return (heightInContainer / containerRect.height) * 100;
   }
 
@@ -1351,12 +1351,12 @@ export class VideoEditorComponent implements OnDestroy {
     const videoBounds = this.getActualVideoBounds();
     const container = this.playerContainer?.nativeElement;
     if (!videoBounds || !container) return;
-    
+
     const containerRect = container.getBoundingClientRect();
     // Calculate position relative to actual video, not container
     const x = ((event.clientX - containerRect.left - videoBounds.x) / videoBounds.width) * 100;
     const y = ((event.clientY - containerRect.top - videoBounds.y) / videoBounds.height) * 100;
-    
+
     this.draggingOverlay.set({
       overlay,
       startX: x,
@@ -1364,37 +1364,37 @@ export class VideoEditorComponent implements OnDestroy {
       offsetX: overlay.x,
       offsetY: overlay.y
     });
-    
+
     // Don't set pointer capture - let the movement shield handle it
   }
 
   protected dragOverlay(event: PointerEvent): void {
     const drag = this.draggingOverlay();
     if (!drag) return;
-    
+
     const videoBounds = this.getActualVideoBounds();
     const container = this.playerContainer?.nativeElement;
     if (!videoBounds || !container) return;
-    
+
     const containerRect = container.getBoundingClientRect();
     // Calculate position relative to actual video, not container
     const x = ((event.clientX - containerRect.left - videoBounds.x) / videoBounds.width) * 100;
     const y = ((event.clientY - containerRect.top - videoBounds.y) / videoBounds.height) * 100;
-    
+
     const deltaX = x - drag.startX;
     const deltaY = y - drag.startY;
-    
+
     const newX = this.clamp(drag.offsetX + deltaX, 0, 100);
     const newY = this.clamp(drag.offsetY + deltaY, 0, 100);
-    
+
     // Update overlay position
-    const updatedOverlays = this.overlays().map(o => 
-      o.id === drag.overlay.id 
+    const updatedOverlays = this.overlays().map(o =>
+      o.id === drag.overlay.id
         ? { ...o, x: newX, y: newY }
         : o
     );
     this.overlays.set(updatedOverlays);
-    
+
     // Update form inputs if form is open
     if (this.overlayFormContainer?.nativeElement && this.showOverlayForm()) {
       const formContainer = this.overlayFormContainer.nativeElement;
@@ -1414,10 +1414,10 @@ export class VideoEditorComponent implements OnDestroy {
     event.stopPropagation();
     const container = this.playerContainer?.nativeElement;
     if (!container) return;
-    
+
     const startX = event.clientX;
     const startY = event.clientY;
-    
+
     if (overlay.type === 'text') {
       // For text, track starting font size
       this.resizingOverlay.set({
@@ -1439,29 +1439,29 @@ export class VideoEditorComponent implements OnDestroy {
         corner
       });
     }
-    
+
     // Don't set pointer capture - let the movement shield handle it
   }
 
   protected resizeOverlay(event: PointerEvent): void {
     const resize = this.resizingOverlay();
     if (!resize) return;
-    
+
     const videoBounds = this.getActualVideoBounds();
     if (!videoBounds) return;
-    
+
     // Calculate delta based on actual video bounds
     const deltaX = ((event.clientX - resize.startX) / videoBounds.width) * 100;
     const deltaY = ((event.clientY - resize.startY) / videoBounds.height) * 100;
-    
+
     // For text overlays, adjust fontSize based on distance from starting point
     if (resize.overlay.type === 'text') {
       // Calculate diagonal distance (Euclidean distance)
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-      
+
       // Determine direction based on corner and movement
       let direction = 1; // 1 = increase, -1 = decrease
-      
+
       if (resize.corner === 'se') {
         // SE: right+down = increase, left+up = decrease
         direction = (deltaX + deltaY >= 0) ? 1 : -1;
@@ -1475,19 +1475,19 @@ export class VideoEditorComponent implements OnDestroy {
         // NW: left+up = increase, right+down = decrease
         direction = (-deltaX - deltaY >= 0) ? 1 : -1;
       }
-      
+
       // Scale fontSize: 1% screen distance = 2px font size
       const fontSizeChange = distance * direction * 2;
       const newFontSize = Math.max(12, Math.min(200, resize.startWidth + fontSizeChange));
-      
+
       // Update text overlay (position stays the same for now - SE behavior)
-      const updatedOverlays = this.overlays().map(o => 
+      const updatedOverlays = this.overlays().map(o =>
         o.id === resize.overlay.id && o.type === 'text'
           ? { ...o, fontSize: newFontSize }
           : o
       );
       this.overlays.set(updatedOverlays);
-      
+
       // Update form input if form is open
       if (this.overlayFormContainer?.nativeElement && this.showOverlayForm()) {
         const formContainer = this.overlayFormContainer.nativeElement;
@@ -1496,22 +1496,22 @@ export class VideoEditorComponent implements OnDestroy {
       }
       return;
     }
-    
+
     // For images and shapes, adjust width/height (in pixels)
     // Get video dimensions to convert percentage deltas to pixel deltas
     const video = this.videoElement?.nativeElement;
     const videoWidth = video?.videoWidth || 1920;
     const videoHeight = video?.videoHeight || 1080;
-    
+
     // Convert percentage delta to pixel delta
     const deltaXPixels = (deltaX / 100) * videoWidth;
     const deltaYPixels = (deltaY / 100) * videoHeight;
-    
+
     let newWidth = resize.startWidth;
     let newHeight = resize.startHeight;
     let newX = resize.overlay.x;
     let newY = resize.overlay.y;
-    
+
     // Adjust based on corner
     if (resize.corner === 'se') {
       // Southeast: adjust width and height, keep x,y
@@ -1534,15 +1534,15 @@ export class VideoEditorComponent implements OnDestroy {
       newX = this.clamp(resize.overlay.x + deltaX, 0, 100);
       newY = this.clamp(resize.overlay.y + deltaY, 0, 100);
     }
-    
+
     // Update overlay
-    const updatedOverlays = this.overlays().map(o => 
+    const updatedOverlays = this.overlays().map(o =>
       o.id === resize.overlay.id && (o.type === 'image' || o.type === 'shape')
         ? { ...o, width: newWidth, height: newHeight, x: newX, y: newY }
         : o
     );
     this.overlays.set(updatedOverlays);
-    
+
     // Update form inputs if form is open (convert pixels back to percentage for display)
     if (this.overlayFormContainer?.nativeElement && this.showOverlayForm()) {
       const formContainer = this.overlayFormContainer.nativeElement;
@@ -1550,11 +1550,11 @@ export class VideoEditorComponent implements OnDestroy {
       const yInput = formContainer.querySelector<HTMLInputElement>('#imageY, #overlayY');
       const widthInput = formContainer.querySelector<HTMLInputElement>('#imageWidth, #shapeWidth');
       const heightInput = formContainer.querySelector<HTMLInputElement>('#imageHeight, #shapeHeight');
-      
+
       // Convert pixels back to percentage for form display
       const widthPercent = Math.round((newWidth / videoWidth) * 100);
       const heightPercent = Math.round((newHeight / videoHeight) * 100);
-      
+
       if (xInput) xInput.value = Math.round(newX).toString();
       if (yInput) yInput.value = Math.round(newY).toString();
       if (widthInput) widthInput.value = widthPercent.toString();
@@ -1640,7 +1640,7 @@ export class VideoEditorComponent implements OnDestroy {
 
       // Use effective cuts (converts segments to cuts if in keep mode)
       const effectiveCuts = this.timelineService.getEffectiveCuts()();
-      
+
       this.errorMessage.set('Rendering...');
       this.renderService.render(
         sourcesWithServerUrls,
@@ -1654,7 +1654,7 @@ export class VideoEditorComponent implements OnDestroy {
         next: async response => {
           this.renderResult.set(response);
           this.renderBusy.set(false);
-          
+
           // Display warning if present
           if (response.warning) {
             this.errorMessage.set(`⚠️ Warning: ${response.warning}`);
@@ -1670,7 +1670,7 @@ export class VideoEditorComponent implements OnDestroy {
             'Render request failed. Ensure the backend server is running.';
           this.errorMessage.set(message);
           this.renderBusy.set(false);
-          
+
           // Clean up uploaded files even on error
           await this.cleanupUploadedFiles(urlMapping.values());
         }
@@ -1682,30 +1682,7 @@ export class VideoEditorComponent implements OnDestroy {
     }
   }
 
-  /**
-   * Clean up uploaded files from server
-   */
-  private async cleanupUploadedFiles(serverUrls: Iterable<string>): Promise<void> {
-    const urls = Array.from(serverUrls);
-    if (urls.length === 0) return;
-
-    try {
-      // Extract filenames from URLs
-      const filenames = urls.map(url => {
-        const match = url.match(/\/uploads\/([^\/]+)$/);
-        return match ? match[1] : null;
-      }).filter((f): f is string => f !== null);
-
-      if (filenames.length > 0) {
-        await firstValueFrom(
-          this.http.post(`${this.backendHost}/api/cleanup`, { filenames })
-        );
-      }
-    } catch (error) {
-      console.warn('Failed to cleanup uploaded files:', error);
-      // Don't show error to user, cleanup failure is not critical
-    }
-  }
+  // ========== Protected Methods (must come before private methods) ==========
 
   protected renderDownloadUrl(): string | null {
     const result = this.renderResult();
@@ -1753,14 +1730,14 @@ export class VideoEditorComponent implements OnDestroy {
     // Ensure audio doesn't extend beyond video duration
     const maxDuration = this.duration();
     const adjustedDuration = Math.min(duration, maxDuration - startTime);
-    
+
     if (adjustedDuration <= 0) {
       this.errorMessage.set('Audio would be completely outside video duration');
       return;
     }
 
     const result = this.audioService.addAudioSource(url, startTime, adjustedDuration, volume, duration);
-    
+
     if (result.success) {
       // If there are existing cuts, adjust the newly added audio for them
       const cuts = this.cutsRaw();
@@ -1769,7 +1746,7 @@ export class VideoEditorComponent implements OnDestroy {
       } else {
         this.initializeAudioPlayback();
       }
-      
+
       this.closeAudioForm();
       this.errorMessage.set('');
     } else {
@@ -1870,13 +1847,13 @@ export class VideoEditorComponent implements OnDestroy {
   protected onAudioTimelinePointerDown(event: PointerEvent, audio: AudioSource): void {
     event.preventDefault();
     event.stopPropagation();
-    
+
     const timeline = (event.currentTarget as HTMLElement).closest('.audio-timeline');
     if (!timeline) return;
 
     const rect = timeline.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    
+
     // Calculate the offset from the start of the audio clip
     const percent = (x / rect.width) * 100;
     const clickTime = (percent / 100) * this.duration();
@@ -1907,16 +1884,16 @@ export class VideoEditorComponent implements OnDestroy {
     const x = event.clientX - rect.left;
     const percent = (x / rect.width) * 100;
     const clickTime = (percent / 100) * this.duration();
-    
+
     // Calculate new start time based on drag offset
-    const dragState = this.audioTimelineDrag as AudioTimelineDrag & { 
-      originalDuration: number; 
+    const dragState = this.audioTimelineDrag as AudioTimelineDrag & {
+      originalDuration: number;
       offsetFromStart: number;
     };
-    
+
     // Calculate new start time: where we clicked minus the offset
     let newStartTime = clickTime - dragState.offsetFromStart;
-    
+
     // Constrain: audio cannot extend beyond video duration
     // Maximum start time is video duration minus original audio duration
     const maxStartTime = Math.max(0, this.duration() - dragState.originalDuration);
@@ -1929,7 +1906,7 @@ export class VideoEditorComponent implements OnDestroy {
 
     // During drag, always preserve original duration for visual consistency
     // Only update the start time - this prevents the shrinking issue
-    const updates: Partial<AudioSource> = { 
+    const updates: Partial<AudioSource> = {
       startTime: newStartTime,
       duration: dragState.originalDuration // Always use original during drag
     };
@@ -1956,13 +1933,13 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected onAudioTimelinePointerUp(event: PointerEvent): void {
     if (this.audioTimelineDrag) {
-      const dragState = this.audioTimelineDrag as AudioTimelineDrag & { 
-        originalDuration: number; 
+      const dragState = this.audioTimelineDrag as AudioTimelineDrag & {
+        originalDuration: number;
       };
-      
+
       // Get current audio state
       const audio = this.audioSources().find(a => a.id === this.audioTimelineDrag!.audioId);
-      
+
       if (audio) {
         // Check if audio extends beyond video duration and adjust if needed
         const endTime = audio.startTime + audio.duration;
@@ -1970,18 +1947,18 @@ export class VideoEditorComponent implements OnDestroy {
           // Adjust duration to fit within video
           const adjustedDuration = Math.max(0, this.duration() - audio.startTime);
           if (adjustedDuration > 0 && adjustedDuration !== audio.duration) {
-            this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, { 
-              duration: adjustedDuration 
+            this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, {
+              duration: adjustedDuration
             });
           }
         } else if (audio.duration !== dragState.originalDuration) {
           // Restore original duration if it was shortened during drag
-          this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, { 
-            duration: dragState.originalDuration 
+          this.audioService.updateAudioSource(this.audioTimelineDrag.audioId, {
+            duration: dragState.originalDuration
           });
         }
       }
-      
+
       (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
       // Reinitialize playback after drag is complete
       this.initializeAudioPlayback();
@@ -2018,7 +1995,7 @@ export class VideoEditorComponent implements OnDestroy {
 
     // Calculate new duration based on trim
     const trimmedDuration = trimEnd - trimStart;
-    
+
     // Check if the trimmed audio would still fit in the video timeline
     const maxDuration = this.duration();
     const endTime = audio.startTime + trimmedDuration;
@@ -2053,41 +2030,13 @@ export class VideoEditorComponent implements OnDestroy {
   }
 
   /**
-   * Upload a file to the server (only called during render)
-   */
-  private async uploadFile(file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    try {
-      const response = await firstValueFrom(
-        this.http.post<{ success: boolean; url: string; filename: string }>(
-          `${this.backendHost}/api/upload`,
-          formData
-        )
-      );
-      
-      if (!response || !response.success || !response.url) {
-        throw new Error('Upload failed: Invalid response');
-      }
-      
-      // Return full URL
-      return `${this.backendHost}${response.url}`;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Upload failed';
-      this.errorMessage.set(`Failed to upload file: ${message}`);
-      throw error;
-    }
-  }
-
-  /**
    * Handle source file selection
    */
   protected async onSourceFileSelected(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    
+
     await this.handleSourceFile(file);
     // Reset input
     input.value = '';
@@ -2099,12 +2048,12 @@ export class VideoEditorComponent implements OnDestroy {
   protected async handleSourceFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
-    
+
     try {
       // Create object URL for preview (doesn't upload to server)
       const objectUrl = this.createLocalFileUrl(file);
       this.sourceForm.controls.sourceUrl.setValue(objectUrl);
-      
+
       // Get duration for video files
       if (file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mpd')) {
         const duration = await this.getVideoDuration(objectUrl);
@@ -2151,7 +2100,7 @@ export class VideoEditorComponent implements OnDestroy {
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingSource.set(false);
-    
+
     const file = event.dataTransfer?.files[0];
     if (file && this.isValidSourceFile(event.dataTransfer)) {
       await this.handleSourceFile(file);
@@ -2163,16 +2112,16 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected isValidSourceFile(dataTransfer: DataTransfer | null): boolean {
     if (!dataTransfer) return false;
-    
+
     const items = Array.from(dataTransfer.items);
     if (items.length === 0) return false;
-    
+
     const item = items[0];
     if (item.kind !== 'file') return false;
-    
+
     const file = item.getAsFile();
     if (!file) return false;
-    
+
     const name = file.name.toLowerCase();
     const validExtensions = ['.mp4', '.m4v', '.mpd', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
     return validExtensions.some(ext => name.endsWith(ext));
@@ -2185,7 +2134,7 @@ export class VideoEditorComponent implements OnDestroy {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    
+
     await this.handleAudioFile(file);
     // Reset input
     input.value = '';
@@ -2197,7 +2146,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected async handleAudioFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
-    
+
     try {
       // Create object URL for preview (doesn't upload to server)
       const objectUrl = this.createLocalFileUrl(file);
@@ -2250,7 +2199,7 @@ export class VideoEditorComponent implements OnDestroy {
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingAudio.set(false);
-    
+
     const file = event.dataTransfer?.files[0];
     if (file && this.isValidAudioFile(event.dataTransfer)) {
       await this.handleAudioFile(file);
@@ -2262,16 +2211,16 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected isValidAudioFile(dataTransfer: DataTransfer | null): boolean {
     if (!dataTransfer) return false;
-    
+
     const items = Array.from(dataTransfer.items);
     if (items.length === 0) return false;
-    
+
     const item = items[0];
     if (item.kind !== 'file') return false;
-    
+
     const file = item.getAsFile();
     if (!file) return false;
-    
+
     const name = file.name.toLowerCase();
     const validExtensions = ['.mp3', '.wav', '.ogg', '.aac', '.m4a'];
     return validExtensions.some(ext => name.endsWith(ext));
@@ -2284,7 +2233,7 @@ export class VideoEditorComponent implements OnDestroy {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    
+
     await this.handleImageFile(file);
     // Reset input
     input.value = '';
@@ -2296,7 +2245,7 @@ export class VideoEditorComponent implements OnDestroy {
   protected async handleImageFile(file: File): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set('');
-    
+
     try {
       // Create object URL for preview (doesn't upload to server)
       const objectUrl = this.createLocalFileUrl(file);
@@ -2349,7 +2298,7 @@ export class VideoEditorComponent implements OnDestroy {
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingImage.set(false);
-    
+
     const file = event.dataTransfer?.files[0];
     if (file && this.isValidImageFile(event.dataTransfer)) {
       await this.handleImageFile(file);
@@ -2361,16 +2310,16 @@ export class VideoEditorComponent implements OnDestroy {
    */
   protected isValidImageFile(dataTransfer: DataTransfer | null): boolean {
     if (!dataTransfer) return false;
-    
+
     const items = Array.from(dataTransfer.items);
     if (items.length === 0) return false;
-    
+
     const item = items[0];
     if (item.kind !== 'file') return false;
-    
+
     const file = item.getAsFile();
     if (!file) return false;
-    
+
     const name = file.name.toLowerCase();
     const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
     return validExtensions.some(ext => name.endsWith(ext));
@@ -2384,7 +2333,7 @@ export class VideoEditorComponent implements OnDestroy {
     const wrapper = input.closest('.unified-input-wrapper');
     if (wrapper) {
       wrapper.classList.toggle('has-value', !!input.value);
-      
+
       // Update signals for drag-hint visibility (signals trigger change detection automatically)
       if (input.id === 'audioUrl') {
         this.audioUrlValue.set(input.value);
@@ -2402,7 +2351,7 @@ export class VideoEditorComponent implements OnDestroy {
     if (event && (event.target as HTMLElement).tagName === 'INPUT') {
       return;
     }
-    
+
     if (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -2430,7 +2379,7 @@ export class VideoEditorComponent implements OnDestroy {
     if (event && (event.target as HTMLElement).tagName === 'INPUT') {
       return;
     }
-    
+
     if (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -2458,7 +2407,7 @@ export class VideoEditorComponent implements OnDestroy {
     if (event && (event.target as HTMLElement).tagName === 'INPUT') {
       return;
     }
-    
+
     if (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -2478,7 +2427,60 @@ export class VideoEditorComponent implements OnDestroy {
     }
   }
 
-  // Private methods
+  // ========== Private Methods ==========
+  /**
+    * Upload a file to the server (only called during render)
+    */
+  private async uploadFile(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await firstValueFrom(
+        this.http.post<{ success: boolean; url: string; filename: string }>(
+          `${this.backendHost}/api/upload`,
+          formData
+        )
+      );
+
+      if (!response || !response.success || !response.url) {
+        throw new Error('Upload failed: Invalid response');
+      }
+
+      // Return full URL
+      return `${this.backendHost}${response.url}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      this.errorMessage.set(`Failed to upload file: ${message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up uploaded files from server
+   */
+  private async cleanupUploadedFiles(serverUrls: Iterable<string>): Promise<void> {
+    const urls = Array.from(serverUrls);
+    if (urls.length === 0) return;
+
+    try {
+      // Extract filenames from URLs
+      const filenames = urls.map(url => {
+        const match = url.match(/\/uploads\/([^/]+)$/);
+        return match ? match[1] : null;
+      }).filter((f): f is string => f !== null);
+
+      if (filenames.length > 0) {
+        await firstValueFrom(
+          this.http.post(`${this.backendHost}/api/cleanup`, { filenames })
+        );
+      }
+    } catch (error) {
+      console.warn('Failed to cleanup uploaded files:', error);
+      // Don't show error to user, cleanup failure is not critical
+    }
+  }
+
   /**
    * Get duration of a video by loading its metadata
    */
@@ -2486,23 +2488,23 @@ export class VideoEditorComponent implements OnDestroy {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
-      
+
       const isMpd = url.toLowerCase().endsWith('.mpd');
-      
+
       if (isMpd) {
         // Use dash.js for MPD files
         const player = dashjs.MediaPlayer().create();
-        
+
         const timeout = setTimeout(() => {
           player.reset();
           reject(new Error('Timeout loading MPD metadata (10s)'));
         }, 10000); // 10 second timeout
-        
+
         // Dash.js fires 'canPlay' when stream is ready
         const onCanPlay = (): void => {
           clearTimeout(timeout);
           const duration = video.duration;
-          
+
           if (duration && !isNaN(duration) && isFinite(duration) && duration > 0) {
             player.reset();
             resolve(duration);
@@ -2511,7 +2513,7 @@ export class VideoEditorComponent implements OnDestroy {
             reject(new Error(`Could not determine video duration from MPD (got ${duration})`));
           }
         };
-        
+
         const onStreamInitialized = (): void => {
           // Sometimes duration is available after stream initialization
           if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
@@ -2520,13 +2522,13 @@ export class VideoEditorComponent implements OnDestroy {
             resolve(video.duration);
           }
         };
-        
+
         const onError = (e: { error?: string }): void => {
           clearTimeout(timeout);
           player.reset();
           reject(new Error(`Failed to load MPD metadata: ${e.error || 'Unknown error'}`));
         };
-        
+
         const onManifestLoaded = (e: { data?: { mediaPresentationDuration?: number } }): void => {
           // The manifest might contain duration info
           if (e && e.data && e.data.mediaPresentationDuration) {
@@ -2535,13 +2537,13 @@ export class VideoEditorComponent implements OnDestroy {
             resolve(e.data.mediaPresentationDuration);
           }
         };
-        
+
         // Listen to dash.js events
         player.on(dashjs.MediaPlayer.events.CAN_PLAY, onCanPlay);
         player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onStreamInitialized);
         player.on(dashjs.MediaPlayer.events.ERROR, onError);
         player.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, onManifestLoaded);
-        
+
         // Also listen to video element events as fallback
         video.addEventListener('loadedmetadata', () => {
           if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
@@ -2550,7 +2552,7 @@ export class VideoEditorComponent implements OnDestroy {
             resolve(video.duration);
           }
         }, { once: true });
-        
+
         // Initialize the player
         player.initialize(video, url, false);
       } else {
@@ -2563,12 +2565,12 @@ export class VideoEditorComponent implements OnDestroy {
           }
           video.src = '';
         });
-        
+
         video.addEventListener('error', () => {
           reject(new Error('Failed to load video metadata'));
           video.src = '';
         });
-        
+
         video.src = url;
       }
     });
@@ -2588,7 +2590,7 @@ export class VideoEditorComponent implements OnDestroy {
     const boundaries = currentSources
       .slice(0, -1)
       .map(source => source.startTime + source.duration);
-    
+
     this.sourceBoundaries.set(boundaries);
   }
 
@@ -2642,7 +2644,7 @@ export class VideoEditorComponent implements OnDestroy {
       text, start, end, x, y, fontSize, fontColor, backgroundColor, opacity,
       this.duration(), mode, this.cuts(), this.segments()
     );
-    
+
     if (result.success) {
       this.closeOverlayForm();
       this.errorMessage.set('');
@@ -2665,10 +2667,10 @@ export class VideoEditorComponent implements OnDestroy {
     const video = this.videoElement?.nativeElement;
     const videoWidth = video?.videoWidth || 1920;
     const videoHeight = video?.videoHeight || 1080;
-    
+
     const widthPixels = Math.round((widthPercent / 100) * videoWidth);
     const heightPixels = Math.round((heightPercent / 100) * videoHeight);
-    
+
     console.log(`[addImageOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
     const mode = this.timelineMode();
@@ -2676,7 +2678,7 @@ export class VideoEditorComponent implements OnDestroy {
       imageUrl, start, end, x, y, widthPixels, heightPixels, opacity,
       this.duration(), mode, this.cuts(), this.segments()
     );
-    
+
     if (result.success) {
       this.closeOverlayForm();
       this.errorMessage.set('');
@@ -2692,17 +2694,17 @@ export class VideoEditorComponent implements OnDestroy {
     return new Promise((resolve, reject) => {
       const audio = new Audio();
       audio.preload = 'metadata';
-      
+
       audio.addEventListener('loadedmetadata', () => {
         resolve(audio.duration);
         audio.src = '';
       });
-      
+
       audio.addEventListener('error', () => {
         reject(new Error('Failed to load audio metadata'));
         audio.src = '';
       });
-      
+
       audio.src = url;
     });
   }
@@ -2724,19 +2726,19 @@ export class VideoEditorComponent implements OnDestroy {
     const video = this.videoElement?.nativeElement;
     const videoWidth = video?.videoWidth || 1920;
     const videoHeight = video?.videoHeight || 1080;
-    
+
     const widthPixels = Math.round((widthPercent / 100) * videoWidth);
     const heightPixels = Math.round((heightPercent / 100) * videoHeight);
-    
+
     console.log(`[addShapeOverlay] Video: ${videoWidth}x${videoHeight}, Percent: ${widthPercent}%x${heightPercent}%, Pixels: ${widthPixels}x${heightPixels}`);
 
     const mode = this.timelineMode();
     const result = this.overlayService.addShape(
-      shapeType, start, end, x, y, widthPixels, heightPixels, 
+      shapeType, start, end, x, y, widthPixels, heightPixels,
       color, strokeWidth, fill, opacity,
       this.duration(), mode, this.cuts(), this.segments()
     );
-    
+
     if (result.success) {
       this.closeOverlayForm();
       this.errorMessage.set('');
@@ -2801,7 +2803,7 @@ export class VideoEditorComponent implements OnDestroy {
   private initializeAudioPlayback(): void {
     // Get current audio sources to clean up elements for removed audio
     const currentAudioIds = new Set(this.audioSources().map(a => a.id));
-    
+
     // Clean up audio elements that no longer exist
     this.audioElements.forEach((audioEl, id) => {
       if (!currentAudioIds.has(id)) {
@@ -2821,14 +2823,14 @@ export class VideoEditorComponent implements OnDestroy {
     // Create or update audio elements for active audio sources
     activeAudio.forEach(audio => {
       let audioEl = this.audioElements.get(audio.id);
-      
+
       if (!audioEl) {
         // Create new audio element
         audioEl = new Audio(audio.url);
         audioEl.preload = 'auto';
         this.audioElements.set(audio.id, audioEl);
       }
-      
+
       // Update volume
       audioEl.volume = audio.volume * masterVolume;
     });
@@ -2877,13 +2879,13 @@ export class VideoEditorComponent implements OnDestroy {
           const audioTrimStart = audio.audioTrimStart ?? 0;
           const audioTrimEnd = audio.audioTrimEnd ?? audio.originalDuration ?? audio.duration;
           const audioCurrentTime = audioTrimStart + timelineOffset;
-          
+
           // Ensure we don't play beyond the trim end
           if (audioCurrentTime >= audioTrimEnd) {
             audioEl.pause();
             return;
           }
-          
+
           // Only seek if drift is significant (0.25s threshold to reduce glitches)
           const drift = Math.abs(audioEl.currentTime - audioCurrentTime);
           if (drift > 0.25) {
@@ -2950,20 +2952,20 @@ export class VideoEditorComponent implements OnDestroy {
     const videoDuration = this.duration();
     const audioBefore = this.audioSources();
     console.log(`[VideoEditor] Audio before adjustment:`, audioBefore.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
-    
+
     // Clean up all existing audio elements before adjusting
     // This ensures that when audio is split, old elements are properly removed
     this.cleanupAudioElements();
-    
+
     this.audioService.adjustAudioForCuts(
       cuts.map(c => ({ start: c.start, end: c.end })),
       videoDuration
     );
-    
+
     const audioAfter = this.audioSources();
     console.log(`[VideoEditor] Audio after adjustment:`, audioAfter.map(a => `ID ${a.id}: [${a.startTime}s - ${a.startTime + a.duration}s]`));
     console.log(`[VideoEditor] Audio adjustment: ${audioBefore.length} -> ${audioAfter.length} tracks`);
-    
+
     // Reinitialize playback with adjusted audio (will create new elements)
     this.initializeAudioPlayback();
   }
